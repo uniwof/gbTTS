@@ -56,6 +56,10 @@ public sealed class VoicePack
     public string? Description { get; set; }
     /// <summary>排序（小的在前），省略时 100。</summary>
     public int Order { get; set; } = 100;
+    /// <summary>第 3 轮：音质排名，由维护者填写，数字小 = 音质好（1 最好）。首次启动在“流畅”的音色里选排名最靠前的做默认。省略时 100。</summary>
+    public int Rank { get; set; } = 100;
+    /// <summary>本机测速结果标签（流畅 / 可用 / 可能卡顿），界面显示用，不写进 voice.json。</summary>
+    [JsonIgnore] public string? SpeedLabel { get; set; }
     public string Sample { get; set; } = "sample.mp3";
     public string Icon { get; set; } = "icon.png";
     /// <summary>大致的加载时间（秒），只用于让进度条走得像样。</summary>
@@ -77,7 +81,7 @@ public sealed class VoicePack
     [JsonIgnore] public string? IconPath { get; private set; }
     [JsonIgnore] public List<string> Warnings { get; } = new();
 
-    public override string ToString() => Name;
+    public override string ToString() => string.IsNullOrEmpty(SpeedLabel) ? Name : $"{Name} · {SpeedLabel}";
 
     /// <summary>sherpa-onnx 里用哪种配置：matcha，或者 vits（melo / piper 也是 vits 结构）。</summary>
     [JsonIgnore] public bool IsMatcha => string.Equals(Engine, "matcha", StringComparison.OrdinalIgnoreCase);

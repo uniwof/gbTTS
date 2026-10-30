@@ -36,6 +36,7 @@ internal sealed class MainForm : Form
     private string _edition = "";
     private string _lastScanProblems = "";
     private readonly TtsEngine _engine = new();
+    private SpeedStore _speed = null!;           // 第 3 轮：本机测速结果（data\speed.json）
     private readonly SamplePlayer _player = new();
     private bool _importing;
     private bool _readingSelection;
@@ -96,6 +97,7 @@ internal sealed class MainForm : Form
     {
         _settingsPath = AppSettings.ResolvePath(_appDir);
         _settings = AppSettings.Load(_settingsPath);
+        _speed = new SpeedStore(Path.Combine(CaretReader.Core.Settings.TextLayerSettings.UserDataDir(_settingsPath), "speed.json"));
         // P1：旧版的五档停顿、旧用户词库迁移到新的用户标点表 / 用户读法词库（只做一次，不覆盖）
         try
         {
@@ -1056,11 +1058,27 @@ internal sealed class MainForm : Form
         try
         {
             int threads = _settings.NumThreads;
+            double newlyMeasured = 0;
             await Task.Run(() =>
             {
                 if (forceReload) _engine.Unload();
                 _engine.Load(voice, threads, _appDir);
+                // 第 3 轮：这个音色第一次用时，测一次本机速度（约 1～2 秒，只测一次，结果存 data\speed.json）
+                if (!_speed.TryGet(voice.Id, out _))
+                {
+                    try
+                    {
+                        double rtf = VoiceSpeed.Measure(t => _engine.Synthesize(TextSplitter.TextForEngine(t), voice.Sid, 1f), _engine.SampleRate);
+                        if (rtf > 0) { _speed.Set(voice.Id, rtf); newlyMeasured = rtf; }
+                    }
+                    catch (Exception ex) { Log.Write("测速失败: " + ex.GetType().Name); }
+                }
             });
+            if (newlyMeasured > 0)
+            {
+                Log.Write($"本机测速: {voice.Id} RTF {newlyMeasured:0.00}（{VoiceSpeed.Label(VoiceSpeed.Classify(newlyMeasured))}）");
+                RefreshVoices(tidy: false);
+            }
             CrashGuard.Mark($"模型已加载，就绪（{voice.Id}）");
             Log.Write($"模型已加载: {voice.Id}，用时 {_loadClock.Elapsed.TotalSeconds:0.0}s，采样率 {_engine.SampleRate}，线程 {threads}");
             _progressTimer.Stop();
@@ -1069,6 +1087,8 @@ internal sealed class MainForm : Form
             _progress = null;
             _bubble.HideNow();
             SetState(State.Idle);
+            if (newlyMeasured > VoiceSpeed.UsableMax)
+                FlashStatus($"「{voice.Name}」在这台电脑上可能卡顿。\n右键「选择音色」，换一个标着「流畅」的试试。", 7000);
         }
         catch (Exception ex)
         {
@@ -1130,9 +1150,17 @@ internal sealed class MainForm : Form
         if (current != null && !list.Any(p => p.Id.Equals(current.Id, StringComparison.OrdinalIgnoreCase)) && _engine.LoadedPackId == current.Id)
             list.Add(current);
 
+        VoiceSpeed.Order(list, _speed);   // 流畅 → 可用 → 未测 → 可能卡顿；同档按 rank
         bool same = list.Count == _packs.Count && list.Zip(_packs).All(t => t.First.Id == t.Second.Id && t.First.Name == t.Second.Name
-                                                                        && t.First.SamplePath == t.Second.SamplePath);
+                                                                        && t.First.SamplePath == t.Second.SamplePath
+                                                                        && t.First.SpeedLabel == t.Second.SpeedLabel);
         if (same && !tidy) return;
+        if (wantId == null && list.Count > 0)
+        {
+            // 第一次启动：选“流畅”（还没测时按 voice.json 的 rank）里音质最好的
+            wantId = VoiceSpeed.PickDefault(list, _speed)?.Id;
+            if (wantId != null) { _settings.VoiceId = wantId; try { _settings.Save(_settingsPath); } catch { } Log.Write("首次启动，默认音色: " + wantId); }
+        }
 
         _packs = list;
         _voiceMenu.SetItems(_packs);
