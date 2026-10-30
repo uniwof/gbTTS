@@ -13,6 +13,8 @@ internal readonly record struct Hotkey(Keys Modifiers, Keys Key)
 
     /// <summary>注册到系统时用的编号：主快捷键 / 停止快捷键。</summary>
     public const int MainId = 0xC0DE, StopId = 0xC0DF;
+    /// <summary>第 3 轮：上一句 / 下一句 / 朗读剪贴板（固定键位）。</summary>
+    public const int PrevId = 0xC0E0, NextId = 0xC0E1, ClipId = 0xC0E2;
 
     /// <summary>是否是一个格式上完整的组合：至少要有 Ctrl 或 Alt，再加一个普通键。</summary>
     public bool IsValid =>

@@ -32,3 +32,12 @@
 ### 下一步
 - CI 再加一个不同快慢的真实音色（如 fanchen 某 sid）凑满 3 个音色。
 - 第 1 轮 v0.7-r1 发布后：测试清单_第2轮 + Release v0.7-r2。
+
+## A 线（第 1 轮界面 + 第 3 轮，分支 feat/）
+
+### 第 3 轮已做（PR #23、#24）
+- 上一句 / 下一句 Ctrl+Alt+PageUp / PageDown，朗读剪贴板 Ctrl+Alt+C：固定键位，注册在 HotkeyWindow（Hotkey.PrevId/NextId/ClipId），被占用时只提示不影响其它。右键 / 托盘菜单同样有这三项。
+- `SpeechPipeline.RunAsync` 新增可选参数 `startIndex`、`tracker`（PlaybackTracker：此刻播到第几句）；原有参数和行为不变。
+- 朗读中换音色：记下当前句 → 停 → 加载新音色 → 从这句继续（MainForm.OnVoiceChangedAsync）。
+- 本机测速：`Core/VoiceSpeed.cs`；首次用某音色时测一次，结果存 data/speed.json（带电脑名，换电脑作废）。voice.json 新字段 `rank`（小 = 音质好，packs.py 暂取 order）。
+- 托盘：v0.6 已有，左键显隐悬浮球，右键菜单即悬浮球右键菜单（含开始/暂停、停止、音色、设置、退出）。
