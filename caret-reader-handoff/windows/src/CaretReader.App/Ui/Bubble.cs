@@ -9,7 +9,7 @@ internal sealed class Bubble : Form
     private string _text = "";
     private readonly System.Windows.Forms.Timer _hide = new();
     private static Font? _font;
-    private static Font BubbleFont => _font ??= new Font(Ink.FontFamilyName, 11f, FontStyle.Regular, GraphicsUnit.Point);
+    private static Font BubbleFont => _font ??= new Font(Ink.FontFamilyName, 14f, FontStyle.Regular, GraphicsUnit.Point);
 
     public Bubble()
     {

@@ -503,16 +503,28 @@ internal sealed class MainForm : Form
                 if (e.Button == MouseButtons.Right) ShowMenu(Cursor.Position);
                 else if (e.Button == MouseButtons.Left)
                 {
-                    // 找回悬浮球：回到右下角并置顶闪一下
-                    if (!Visible) Show();
-                    _settings.BallX = null; _settings.BallY = null;
-                    RestoreBallPosition();
-                    ReassertTopMost();
-                    FlashStatus("我在这里 · 单击朗读 / 暂停 · ■ 停止 · 右键菜单");
+                    // 左键：显示 / 隐藏悬浮球
+                    if (Visible) { Hide(); _bubble.HideNow(); }
+                    else
+                    {
+                        Show();
+                        RestoreBallPosition();
+                        ReassertTopMost();
+                        FlashStatus("我在这里 · " + StatusText());
+                    }
                 }
             };
+            _tray.DoubleClick += (_, _) => { };
+            _tray.MouseMove += (_, _) => UpdateTrayText();
         }
         catch (Exception ex) { Log.Write("托盘图标创建失败: " + ex.Message); }
+    }
+
+    private void UpdateTrayText()
+    {
+        if (_tray == null) return;
+        string t = "光标朗读 · " + StatusText().Replace("\n", " ");
+        _tray.Text = t.Length > 62 ? t.Substring(0, 62) : t;   // NotifyIcon.Text 上限 63 字符
     }
 
     // =====================================================================
@@ -528,7 +540,7 @@ internal sealed class MainForm : Form
     }
 
     /// <summary>在球旁边显示一条提示，ms 毫秒后消失（默认 4 秒）。</summary>
-    private void FlashStatus(string text, int ms = 4000)
+    private void FlashStatus(string text, int ms = 2500)
     {
         if (IsDisposed) return;
         _bubbleIsHover = false;
