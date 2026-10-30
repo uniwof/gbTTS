@@ -23,4 +23,9 @@
     <PackageReference Include="org.k2fsa.sherpa.onnx" Version="1.13.8" />
   </ItemGroup>
 
+  <ItemGroup>
+    <!-- P1：内置读法规则（rules/*.tsv）随程序发布到 exe 旁边的 rules\ 文件夹；测试项目也会带上 -->
+    <None Include="../../rules/*.tsv" Link="rules/%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
 </Project>
