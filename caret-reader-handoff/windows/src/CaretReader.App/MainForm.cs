@@ -75,6 +75,7 @@ internal sealed class MainForm : Form
     private int _tbOverMs, _tbAwayMs;
     private readonly StopButton _stop = new();               // P0：■ 停止按钮
     private readonly InkDropDown _voiceMenu = new();          // 不放进窗口，只用它的音色菜单（带试听小喇叭）
+    private readonly NoActivateMenu _moreMenu = new() { Renderer = new InkMenuRenderer(), ShowImageMargin = false, ShowCheckMargin = false };
     private readonly NoActivateMenu _menu = new() { Renderer = new InkMenuRenderer(), ShowImageMargin = false, ShowCheckMargin = false };
     private NotifyIcon? _tray;
     private string _petFrame = "sleep";
@@ -137,10 +138,14 @@ internal sealed class MainForm : Form
         _tbPoll.Tick += (_, _) => PollToolbar();
         _tbPoll.Start();
         _toolbar.StopClicked += () => { try { _toolbar.HideNow(); if (_state is State.Grabbing or State.Reading or State.Paused) { StopReading(); FlashStatus("已停止", 2500); } } catch { } };
+        _toolbar.PrevClicked += () => { try { NavSentence(-1); } catch { } };
+        _toolbar.NextClicked += () => { try { NavSentence(+1); } catch { } };
         _toolbar.VoiceClicked += () => { try { ShowMenu(Cursor.Position); } catch { } };
-        _hoverTimer.Tick += (_, _) => { _hoverTimer.Stop(); if (_hover && !_leftDown) ShowStatusBubble(); };
+        _hoverTimer.Tick += (_, _) => { _hoverTimer.Stop(); { } };
         _progressTimer.Tick += (_, _) => UpdateLoadProgress();
         _menu.Font = Ink.UiFont;
+        _moreMenu.Font = Ink.UiFont;
+        _moreMenu.Closed += (_, _) => { ReturnFocus(); Redraw(); };
         _menu.Closed += (_, _) => { ReturnFocus(); Redraw(); };
 
         Microsoft.Win32.SystemEvents.SessionSwitch += OnSessionSwitch;
@@ -468,32 +473,40 @@ internal sealed class MainForm : Form
             if (onClick != null) it.Click += (_, _) => onClick();
             return it;
         }
-        var head = Item(StatusText(), null, enabled: false);
-        _menu.Items.Add(head);
-        _menu.Items.Add(new ToolStripSeparator());
-
-        string act = _state switch { State.Reading or State.Grabbing => "暂停", State.Paused => "继续", _ => "从光标处朗读（单击小人）" };
+        string act = _state switch { State.Reading or State.Grabbing => "暂停", State.Paused => "继续", _ => "朗读" };
         bool canAct = _state is State.Idle or State.Reading or State.Paused or State.Grabbing;
+        bool busy = _state != State.Loading && !_importing;
         _menu.Items.Add(Item(act, () => _ = OnMainActionAsync(Stopwatch.GetTimestamp(), CurrentTarget("菜单")), canAct));
-        _menu.Items.Add(Item("停止（点小人旁边的 ■）", () => { StopReading(); FlashStatus("已停止"); }, _state is State.Reading or State.Paused or State.Grabbing));
-        bool navOk = _queue != null && _state is State.Reading or State.Paused;
-        _menu.Items.Add(Item("上一句（Ctrl+Alt+PageUp）", () => NavSentence(-1), navOk));
-        _menu.Items.Add(Item("下一句（Ctrl+Alt+PageDown）", () => NavSentence(+1), navOk));
-        _menu.Items.Add(Item("朗读剪贴板（Ctrl+Alt+C）", () => OnClipboardKey(Stopwatch.GetTimestamp()),
-                             _state is State.Idle or State.Reading or State.Paused or State.Grabbing));
-        _menu.Items.Add(new ToolStripSeparator());
-        string voiceName = (_voiceMenu.SelectedItem as VoicePack)?.Name ?? "（没有音色）";
-        _menu.Items.Add(Item($"选择音色 / 试听：{voiceName}", () => BeginInvoke(() => _voiceMenu.ShowAt(new Point(Left, Top))),
-                             _state != State.Loading && !_importing && _packs.Count > 0));
-        _menu.Items.Add(Item("导入音色包…", ImportVoices, _state != State.Loading && !_importing));
-        _menu.Items.Add(new ToolStripSeparator());
-        _menu.Items.Add(Item("始终置顶", ToggleTopMost, check: _settings.TopMost));
-        _menu.Items.Add(Item("外观：看书的小人", () => SetAppearance("pet"), _render.HasPet, check: CurrentLook == BallRenderer.Look.Pet));
-        _menu.Items.Add(Item("外观：简单圆球（最省资源）", () => SetAppearance("ball"), check: CurrentLook == BallRenderer.Look.Ball));
-        _menu.Items.Add(new ToolStripSeparator());
-        _menu.Items.Add(Item("设置…", OpenSettings, _state != State.Loading && !_importing));
-        _menu.Items.Add(Item("关于 / 第三方许可", () => { using var f = new AboutForm(); f.ShowDialog(this); ReturnFocus(); }));
+        _menu.Items.Add(Item("停止", () => { StopReading(); FlashStatus("已停止"); }, _state is State.Reading or State.Paused or State.Grabbing));
+        _menu.Items.Add(Item("音色 ▸", () => BeginInvoke(() => _voiceMenu.ShowAt(new Point(Left, Top))), busy && _packs.Count > 0));
+        _menu.Items.Add(Item("设置…", OpenSettings, busy));
         _menu.Items.Add(Item("退出", Close));
+        _menu.Items.Add(new ToolStripSeparator());
+        _menu.Items.Add(Item("更多 ▸", () => BeginInvoke(() => ShowMoreMenu(Cursor.Position))));
+    }
+
+    private void ShowMoreMenu(Point screen)
+    {
+        _moreMenu.Items.Clear();
+        int w = Ink.S(this, 240), h = Ink.S(this, 34);
+        ToolStripMenuItem Item(string text, Action onClick, bool enabled = true, bool check = false)
+        {
+            var it = new ToolStripMenuItem((check ? "■  " : "    ") + text) { AutoSize = false, Width = w, Height = h, Enabled = enabled, TextAlign = ContentAlignment.MiddleLeft };
+            it.Click += (_, _) => onClick();
+            return it;
+        }
+        bool navOk = _queue != null && _state is State.Reading or State.Paused;
+        _moreMenu.Items.Add(Item("上一句", () => NavSentence(-1), navOk));
+        _moreMenu.Items.Add(Item("下一句", () => NavSentence(+1), navOk));
+        _moreMenu.Items.Add(Item("朗读剪贴板", () => OnClipboardKey(Stopwatch.GetTimestamp()),
+                             _state is State.Idle or State.Reading or State.Paused or State.Grabbing));
+        _moreMenu.Items.Add(Item("导入音色包…", ImportVoices, _state != State.Loading && !_importing));
+        _moreMenu.Items.Add(new ToolStripSeparator());
+        _moreMenu.Items.Add(Item("始终置顶", ToggleTopMost, check: _settings.TopMost));
+        _moreMenu.Items.Add(Item("外观：看书的小人", () => SetAppearance("pet"), _render.HasPet, check: CurrentLook == BallRenderer.Look.Pet));
+        _moreMenu.Items.Add(Item("外观：简单圆球", () => SetAppearance("ball"), check: CurrentLook == BallRenderer.Look.Ball));
+        _moreMenu.Items.Add(Item("关于 / 第三方许可", () => { using var f = new AboutForm(); f.ShowDialog(this); ReturnFocus(); }));
+        _moreMenu.Show(screen);
     }
 
     private void ToggleTopMost()

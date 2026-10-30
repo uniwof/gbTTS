@@ -13,6 +13,11 @@ internal sealed class MiniToolbar : Form
     private string _voiceName = "音色";
     public event Action? StopClicked;
     public event Action? VoiceClicked;
+    public event Action? PrevClicked;
+    public event Action? NextClicked;
+    private readonly System.Windows.Forms.Timer _tipTimer = new() { Interval = 800 };
+    private readonly ToolTip _tip = new();
+    private static readonly string[] Tips = { "停止朗读", "上一句", "下一句", "换音色" };
 
     public MiniToolbar()
     {
@@ -23,6 +28,7 @@ internal sealed class MiniToolbar : Form
         BackColor = Ink.PaperPure;
         DoubleBuffered = true;
         TopMost = true;
+        _tipTimer.Tick += (_, _) => { _tipTimer.Stop(); if (_hotCell >= 0 && Visible) _tip.Show(Tips[_hotCell], this, 4, Height + 2, 2500); };
     }
 
     protected override CreateParams CreateParams
@@ -56,7 +62,7 @@ internal sealed class MiniToolbar : Form
         Visible = true;
     }
 
-    public void HideNow() { _hotCell = -1; if (Visible) Hide(); }
+    public void HideNow() { _hotCell = -1; _tipTimer.Stop(); _tip.Hide(this); if (Visible) Hide(); }
 
     private Rectangle CellRect(int i)
     {
@@ -65,7 +71,7 @@ internal sealed class MiniToolbar : Form
     }
     private int CellAt(Point p) { for (int i = 0; i < Cells; i++) if (CellRect(i).Contains(p)) return i; return -1; }
 
-    protected override void OnMouseMove(MouseEventArgs e) { base.OnMouseMove(e); int c = CellAt(e.Location); if (c != _hotCell) { _hotCell = c; Invalidate(); } }
+    protected override void OnMouseMove(MouseEventArgs e) { base.OnMouseMove(e); int c = CellAt(e.Location); if (c != _hotCell) { _hotCell = c; _tip.Hide(this); _tipTimer.Stop(); if (c >= 0) _tipTimer.Start(); Invalidate(); } }
     protected override void OnMouseLeave(EventArgs e) { base.OnMouseLeave(e); _hotCell = -1; Invalidate(); }
     protected override void OnMouseDown(MouseEventArgs e)
     {
@@ -74,7 +80,8 @@ internal sealed class MiniToolbar : Form
         int c = CellAt(e.Location);
         if (c == 0) StopClicked?.Invoke();
         else if (c == 3) VoiceClicked?.Invoke();
-        // 1、2（上一句/下一句）P2 才有功能，现在不响应
+        else if (c == 1) PrevClicked?.Invoke();
+        else if (c == 2) NextClicked?.Invoke();
     }
 
     protected override void OnPaint(PaintEventArgs e)
@@ -85,7 +92,7 @@ internal sealed class MiniToolbar : Form
         for (int i = 0; i < Cells; i++)
         {
             var r = CellRect(i);
-            bool enabled = i == 0 || i == 3;
+            bool enabled = true;
             if (enabled && i == _hotCell) { using var b = new SolidBrush(Ink.Grey1); g.FillRectangle(b, r); }
             if (i > 0) { using var pen = new Pen(Ink.InkBlack); g.DrawLine(pen, r.Left, 3, r.Left, Height - 4); }
             using var br = new SolidBrush(enabled ? Ink.InkBlack : Color.FromArgb(170, 170, 170));
