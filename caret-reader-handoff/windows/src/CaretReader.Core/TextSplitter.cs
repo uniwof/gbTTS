@@ -314,6 +314,8 @@ public static class TextSplitter
             while (end > m.Index && ".,;:!?)".IndexOf(text[end - 1]) >= 0) end--;
             for (int k = m.Index; k < end; k++) inUrl[k] = true;
         }
+        var ann = CaretReader.Core.Text.PinyinAnnotation.Mask(text);
+        for (int k = 0; k < text.Length; k++) if (ann[k]) inUrl[k] = true;   // 注释里的字符不当标点
         var lineEnd = LineEndPauses(text, table, opt);
 
         var current = new StringBuilder();
@@ -643,7 +645,7 @@ public static class TextSplitter
 
     private static bool[] UrlMask(string s)
     {
-        var mask = new bool[s.Length];
+        var mask = CaretReader.Core.Text.PinyinAnnotation.Mask(s);   // P1：拼音注释中间也不能切
         foreach (Match m in UrlRegex.Matches(s))
             for (int k = m.Index; k < m.Index + m.Length; k++) mask[k] = true;
         return mask;
