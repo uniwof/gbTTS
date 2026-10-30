@@ -50,3 +50,51 @@ jobs:
           name: gbTTS-portable-win10x64
           path: caret-reader-handoff/release/**/*.zip
           compression-level: 0
+
+  preview:
+    needs: build
+    if: github.event_name == 'push' && github.ref == 'refs/heads/dev'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: gbTTS-portable-win10x64
+          path: dl
+      - name: 发布/覆盖预览版 Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -e
+          ZIP=$(find dl -name '*.zip' | head -1)
+          cp "$ZIP" gbTTS-preview-win10x64.zip
+          SHA=$(git rev-parse --short HEAD)
+          cat > notes.md <<NOTES
+          # 光标朗读 测试版（自动更新）
+
+          这是测试版，每次开发有进展都会自动更新，下载地址不变。
+
+          ## 怎么用
+          1. 下载下面的 gbTTS-preview-win10x64.zip，解压到任意文件夹（路径尽量不要有中文）。
+          2. 双击 CaretReader.exe 运行，屏幕上会出现一个小球。
+          3. 鼠标点文字旁边的小球就朗读，再点一下停止；鼠标停在球上会出现小工具条。
+
+          ## 目前包含的功能
+          - 光标/选中文字朗读，自带清朗音色，离线可用
+          - 停止按钮、取消双击、拖动防误触
+          - 悬停迷你工具条（停止、音色选择）
+          - 托盘图标与右键菜单、提示气泡（陆续完善中）
+
+          本版本对应代码：$SHA，更新时间：$(TZ=Asia/Shanghai date '+%Y-%m-%d %H:%M') 北京时间
+          NOTES
+          sed -i 's/^          //' notes.md
+          git tag -f preview "$GITHUB_SHA"
+          git push -f origin refs/tags/preview
+          if gh release view preview >/dev/null 2>&1; then
+            gh release edit preview --prerelease --target dev --notes-file notes.md --title "测试版（preview）"
+            gh release upload preview gbTTS-preview-win10x64.zip --clobber
+          else
+            gh release create preview gbTTS-preview-win10x64.zip --prerelease --target dev --title "测试版（preview）" --notes-file notes.md
+          fi

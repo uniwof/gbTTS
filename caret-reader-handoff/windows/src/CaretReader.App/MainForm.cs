@@ -63,6 +63,9 @@ internal sealed class MainForm : Form
     // ---------- 外观 ----------
     private readonly BallRenderer _render = new();
     private readonly Bubble _bubble = new();
+    private readonly MiniToolbar _toolbar = new();                // P0：悬停 0.8s 迷你工具条
+    private readonly System.Windows.Forms.Timer _tbPoll = new() { Interval = 100 };
+    private int _tbOverMs, _tbAwayMs;
     private readonly StopButton _stop = new();               // P0：■ 停止按钮
     private readonly InkDropDown _voiceMenu = new();          // 不放进窗口，只用它的音色菜单（带试听小喇叭）
     private readonly ContextMenuStrip _menu = new() { Renderer = new InkMenuRenderer(), ShowImageMargin = false, ShowCheckMargin = false };
@@ -114,6 +117,10 @@ internal sealed class MainForm : Form
             Log.Write($"点 ■ 停止（状态 {_state}）");
             if (_state is State.Grabbing or State.Reading or State.Paused) { StopReading(); FlashStatus("已停止", 2500); }
         };
+        _tbPoll.Tick += (_, _) => PollToolbar();
+        _tbPoll.Start();
+        _toolbar.StopClicked += () => { try { _toolbar.HideNow(); if (_state is State.Grabbing or State.Reading or State.Paused) { StopReading(); FlashStatus("已停止", 2500); } } catch { } };
+        _toolbar.VoiceClicked += () => { try { ShowMenu(Cursor.Position); } catch { } };
         _hoverTimer.Tick += (_, _) => { _hoverTimer.Stop(); if (_hover && !_leftDown) ShowStatusBubble(); };
         _progressTimer.Tick += (_, _) => UpdateLoadProgress();
         _menu.Font = Ink.UiFont;
@@ -250,6 +257,23 @@ internal sealed class MainForm : Form
         base.OnMove(e);
         Redraw();
         if (_stop.Showing) _stop.ShowBeside(Bounds);   // 拖动球时 ■ 跟着走
+    }
+
+    private void PollToolbar()
+    {
+        if (IsDisposed || !IsHandleCreated) return;
+        var p = Cursor.Position;
+        bool over = Visible && (Bounds.Contains(p) || (_toolbar.Visible && _toolbar.Bounds.Contains(p)));
+        if (over) { _tbOverMs += _tbPoll.Interval; _tbAwayMs = 0; } else { _tbAwayMs += _tbPoll.Interval; _tbOverMs = 0; }
+        if (_leftDown || _dragging) { _tbOverMs = 0; return; }
+        bool want = BallLayout.ToolbarShouldBeOpen(_toolbar.Visible, over, _tbOverMs, _tbAwayMs);
+        if (want && !_toolbar.Visible)
+        {
+            var pk = _voiceMenu.SelectedItem as VoicePack;
+            _toolbar.SetVoiceName(pk?.Name ?? "音色");
+            _toolbar.ShowBeside(Bounds);
+        }
+        else if (!want && _toolbar.Visible) _toolbar.HideNow();
     }
 
     /// <summary>P0：取文字 / 朗读 / 暂停时显示 ■，其它状态收起。球被隐藏时也收起。</summary>
@@ -1129,7 +1153,7 @@ internal sealed class MainForm : Form
     {
         if (disposing)
         {
-            _anim.Dispose(); _hoverTimer.Dispose(); _stop.Dispose(); _progressTimer.Dispose();
+            _anim.Dispose(); _hoverTimer.Dispose(); _stop.Dispose(); _toolbar.Dispose(); _tbPoll.Dispose(); _progressTimer.Dispose();
             _readCts?.Dispose();
             _player.Dispose();
             _render.Dispose();

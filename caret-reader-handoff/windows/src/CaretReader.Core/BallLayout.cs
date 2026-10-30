@@ -53,4 +53,21 @@ public static class BallLayout
 
     /// <summary>球处于这些状态时显示 ■ 停止按钮（取文字、朗读、暂停）。</summary>
     public static bool ShowStop(bool grabbing, bool reading, bool paused) => grabbing || reading || paused;
+
+    /// <summary>
+    /// 迷你工具条的位置：和球垂直居中，放在球远离屏幕边缘的一侧，完整落在工作区里。
+    /// </summary>
+    public static Rectangle ToolbarRect(Rectangle ball, Rectangle workArea, int width, int height, int gap)
+    {
+        int side = SideAwayFromEdge(ball, workArea);
+        int x = side < 0 ? ball.Left - gap - width : ball.Right + gap;
+        int y = ball.Top + (ball.Height - height) / 2;
+        x = Math.Clamp(x, workArea.Left, Math.Max(workArea.Left, workArea.Right - width));
+        y = Math.Clamp(y, workArea.Top, Math.Max(workArea.Top, workArea.Bottom - height));
+        return new Rectangle(x, y, width, height);
+    }
+
+    /// <summary>悬停计时：鼠标在球/工具条上连续停留 HoverShowMs 展开；离开连续 HoverHideMs 收起。</summary>
+    public static bool ToolbarShouldBeOpen(bool open, bool overAny, int overMs, int awayMs)
+        => open ? !(!overAny && awayMs >= HoverHideMs) : (overAny && overMs >= HoverShowMs);
 }
