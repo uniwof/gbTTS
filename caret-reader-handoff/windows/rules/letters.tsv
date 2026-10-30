@@ -1,0 +1,27 @@
+# 字母读音（文档 5.5）。列：字母	拼音	备注。只能写标准带调拼音（会通过 PUA 交给模型）。
+A	ei1
+B	bi4
+C	xi1
+D	di4
+E	yi4
+F	ai2 fu1
+G	ji4
+H	ei1 qi1
+I	ai4
+J	jie4
+K	kai4
+L	ai2 le1
+M	ai2 mu1
+N	en1
+O	ou1
+P	pi1
+Q	ke1 you1
+R	a1 er3
+S	ai2 si1
+T	ti4
+U	you1
+V	wei1
+W	da2 bu1 liu1
+X	ai2 ke4 si1
+Y	wai4
+Z	zei4
