@@ -15,4 +15,7 @@
   <ItemGroup>
     <ProjectReference Include="../../src/CaretReader.Core/CaretReader.Core.csproj" />
   </ItemGroup>
+  <ItemGroup>
+    <None Include="../corpus/*.tsv" Link="corpus/%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
 </Project>
