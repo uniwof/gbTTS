@@ -115,7 +115,7 @@ def assemble(out, only=None):
         fj['ruleFsts'] = m['fsts']
         fj['puaMap'] = 'pua_map.txt'
         vj = dict(formatVersion=1, id=vid, name=name, engine=m['engine'], sid=sid,
-                  gain=round(g.get(vid, 1.0), 2), speed=1.0, description=desc, order=order,
+                  gain=round(g.get(vid, 1.0), 2), speed=1.0, description=desc, order=order, rank=order,
                   sample='sample.mp3', icon='icon.png', approxLoadSeconds=m['load'],
                   modelBytes=os.path.getsize(os.path.join(d, m['model'])), files=fj)
         with open(os.path.join(d, 'voice.json'), 'w', encoding='utf-8') as fp:
