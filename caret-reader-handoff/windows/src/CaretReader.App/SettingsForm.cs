@@ -104,6 +104,10 @@ internal sealed class SettingsForm : Form
         };
         Controls.Add(rulesBtn);
         _y += S(36);
+        var paceBtn = new InkButton { Text = "语速与停顿…", Bounds = new Rectangle(S(24), _y, S(152), S(28)) };
+        paceBtn.Click += (_, _) => { using var f = new PacingForm(Result.VoiceId ?? "chaowen-0"); f.ShowDialog(this); };
+        Controls.Add(paceBtn);
+        _y += S(36);
         Hint("读错的字、网络用语、标点停顿长短，都在这里改");
         _y += S(8);
 
