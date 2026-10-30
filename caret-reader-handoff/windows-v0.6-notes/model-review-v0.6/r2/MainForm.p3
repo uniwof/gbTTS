@@ -1,0 +1,249 @@
+                      "<zh>");
+        }
+        CrashGuard.Mark("<zh>");
+        try { _edition = File.ReadAllText(Path.Combine(_appDir, "edition.txt")).Trim(); } catch { _edition = ""; }
+        if (_edition.Length > 12) _edition = _edition.Substring(0, 12);
+        if (_edition != "") { Text = "<zh>" + _edition; if (_tray != null) _tray.Text = Text; }
+        VoiceImporter.CleanupTemp(_appDir);
+        RefreshVoices(tidy: true);
+        CrashGuard.Mark("<zh>");
+        ApplyHotkeys(_settings.Hotkey, _settings.StopHotkey, showErrors: true);
+        if (_packs.Count == 0)
+        {
+            SetState(State.NoModel);
+            ShowError("<zh>" +
+                      "<zh>");
+            return;
+        }
+        await LoadSelectedVoiceAsync();
+        if (_state == State.Idle) FlashStatus("<zh>", 5000);
+    }
+    protected override void OnFormClosing(FormClosingEventArgs e)
+    {
+        base.OnFormClosing(e);
+        _anim.Stop(); _progressTimer.Stop(); _clickTimer.Stop(); _hoverTimer.Stop();
+        Microsoft.Win32.SystemEvents.SessionSwitch -= OnSessionSwitch;
+        Microsoft.Win32.SystemEvents.DisplaySettingsChanged -= OnDisplayChanged;
+        UnregisterHotkeys();
+        StopReading();
+        _player.Stop();
+        _bubble.HideNow();
+        if (_tray != null) { _tray.Visible = false; _tray.Dispose(); _tray = null; }
+        _tracker?.Dispose();
+        try
+        {
+            _settings.BallX = Left; _settings.BallY = Top;
+            _settings.Save(_settingsPath);
+        }
+        catch (Exception ex) { Log.Write("<zh>" + ex.Message); }
+        CrashGuard.Mark("<zh>");
+        try { _readTask.Wait(3000); } catch { }
+        try { Task.Run(_engine.Dispose).Wait(3000); } catch { }
+        Log.Write("<zh>");
+        CrashGuard.CleanExit();
+    }
+    private void OnHotkey(int id, long pressedAt)
+    {
+        if (id == Hotkey.StopId) { Log.Write("<zh>"); OnStopKey(); return; }
+        var target = CurrentTarget("<zh>");
+        Log.Write("<zh>");
+        _ = OnMainActionAsync(pressedAt, target);
+    }
+    private CaretTextGrabber.Target CurrentTarget(string trigger)
+    {
+        var fg = Native.GetForegroundWindow();
+        if (fg != IntPtr.Zero && !FocusTracker.IsOwn(fg))
+        {
+            _tracker?.Update(fg);
+            return CaretTextGrabber.Target.Describe(fg, Native.ThreadFocusOf(fg).focus, trigger);
+        }
+        var last = _tracker?.LastWindow ?? IntPtr.Zero;
+        return CaretTextGrabber.Target.Describe(last, _tracker?.LastFocus ?? IntPtr.Zero, trigger + (fg == IntPtr.Zero ? "<zh>" : "<zh>"));
+    }
+    private void UnregisterHotkeys()
+    {
+        if (_mainRegistered) Hotkey.Unregister(_hotkeys.Handle, Hotkey.MainId);
+        if (_stopRegistered) Hotkey.Unregister(_hotkeys.Handle, Hotkey.StopId);
+        _mainRegistered = _stopRegistered = false;
+    }
+    private static Hotkey Sanitize(string text, Hotkey fallback, string name, List<string> errors)
+    {
+        var hk = Hotkey.Parse(text);
+        if (hk == null)
+        {
+            Log.Write("<zh>");
+            errors.Add("<zh>");
+            return fallback;
+        }
+        if (hk.Value.Problem is string why)
+        {
+            Log.Write("<zh>");
+            errors.Add("<zh>");
+            return fallback;
+        }
+        return hk.Value;
+    }
+    private bool ApplyHotkeys(string mainText, string stopText, bool showErrors)
+    {
+        var errors = new List<string>();
+        var main = Sanitize(mainText, Hotkey.Default, "<zh>", errors);
+        var stop = Sanitize(stopText, Hotkey.DefaultStop, "<zh>", errors);
+        UnregisterHotkeys();
+        _mainRegistered = TryRegister(main, Hotkey.MainId, _hotkey, "<zh>", errors, out _hotkey);
+        if (stop.Equals(_hotkey))
+        {
+            Log.Write("<zh>");
+            errors.Add("<zh>");
+            _stopRegistered = false;
+        }
+        else
+        {
+            var oldStop = _stopHotkey.Equals(_hotkey) ? stop : _stopHotkey;
+            _stopRegistered = TryRegister(stop, Hotkey.StopId, oldStop, "<zh>", errors, out _stopHotkey);
+        }
+        if (errors.Count > 0 && showErrors) ShowError(string.Join("\n\n", errors));
+        return errors.Count == 0;
+    }
+    private bool TryRegister(Hotkey wanted, int id, Hotkey previous, string name, List<string> errors, out Hotkey result)
+    {
+        if (wanted.Register(_hotkeys.Handle, id))
+        {
+            Log.Write("<zh>");
+            result = wanted;
+            return true;
+        }
+        Log.Write("<zh>");
+        if (!wanted.Equals(previous) && previous.Register(_hotkeys.Handle, id))
+        {
+            errors.Add("<zh>");
+            result = previous;
+            return true;
+        }
+        errors.Add("<zh>");
+        result = previous;
+        return false;
+    }
+    private async Task OnMainActionAsync(long pressedAt, CaretTextGrabber.Target target)
+    {
+        switch (_state)
+        {
+            case State.Idle:
+                await StartReadingAsync(pressedAt, target);
+                return;
+            case State.Reading:
+                PauseReading();
+                return;
+            case State.Paused:
+                ResumeReading();
+                return;
+            case State.Grabbing:
+                _pauseRequested = !_pauseRequested;
+                FlashStatus(_pauseRequested ? "<zh>" : "<zh>", 2000);
+                return;
+            case State.Loading:
+                FlashStatus("<zh>");
+                return;
+            case State.NoModel:
+                FlashStatus(_packs.Count == 0 ? "<zh>" : "<zh>");
+                return;
+        }
+    }
+    private void OnStopKey()
+    {
+        if (_state is State.Grabbing or State.Reading or State.Paused)
+        {
+            StopReading();
+            FlashStatus("<zh>");
+        }
+    }
+    private void PauseReading()
+    {
+        _sink?.Pause();
+        SetState(State.Paused);
+        Log.Write("<zh>");
+    }
+    private void ResumeReading()
+    {
+        _player.Stop();
+        _sink?.Resume();
+        SetState(State.Reading);
+        Log.Write("<zh>");
+    }
+    private async Task StartReadingAsync(long pressedAt, CaretTextGrabber.Target target)
+    {
+        int session = ++_readSession;
+        var cts = new CancellationTokenSource();
+        _readCts = cts;
+        _pauseRequested = false;
+        _readingSelection = false;
+        _player.Stop();
+        SetState(State.Grabbing);
+        CaretTextGrabber.Result grab;
+        try { grab = await _grabber.GrabAsync(target, cts.Token); }
+        catch (OperationCanceledException) { return; }
+        catch (Exception ex)
+        {
+            Log.Write("<zh>" + ex);
+            grab = new CaretTextGrabber.Result(null, "?", ex.Message);
+        }
+        if (session != _readSession || cts.IsCancellationRequested) return;
+        double grabSeconds = Stopwatch.GetElapsedTime(pressedAt).TotalSeconds;
+        Log.Write("<zh>"（选中的文字）" : ""<zh>"（其余后台读取）" : "")}，" +
+                  "<zh>");
+        var pauses = _settings.Pauses;
+        string? text = grab.Text;
+        var first = await Task.Run(() => TextSplitter.Split(text, pauses, firstChunk: true, CaretTextGrabber.MaxChars));
+        if (session != _readSession || cts.IsCancellationRequested) return;
+        if (first.Count == 0 && grab.Rest == null)
+        {
+            SetState(State.Idle);
+            FlashStatus(grab.Unsupported ? (grab.Detail ?? "<zh>")
+                      : grab.NoCaret ? "<zh>"
+                      : grab.Text == null ? "<zh>"
+                      : grab.Selection ? "<zh>" : "<zh>", 6000);
+            return;
+        }
+        var queue = new ClauseQueue();
+        queue.Add(first);
+        if (grab.Rest == null) queue.Complete();
+        var voice = (VoicePack)_voiceMenu.SelectedItem!;
+        float speed = (float)Math.Clamp(voice.Speed * _settings.Speed, 0.5, 2.0);
+        _readingSelection = grab.Selection;
+        var sink = new NAudioSink();
+        _sink = sink;
+        if (_pauseRequested) { sink.Pause(); SetState(State.Paused); }
+        else SetState(State.Reading);
+        _pauseRequested = false;
+        CrashGuard.Mark("<zh>");
+        var task = SpeechPipeline.RunAsync(queue, _engine, voice.Sid, speed, sink, cts.Token,
+                                           onClause: null, hotkeyTimestamp: pressedAt, gain: (float)voice.Gain)
+            .ContinueWith(t =>
+            {
+                var st = t.Result;
+                Log.Write("<zh>" +
+                          "<zh>"无"}");
+                sink.Dispose();
+                return st;
+            }, TaskScheduler.Default);
+        _readTask = task;
+        if (grab.Rest != null) _ = FetchRestAsync(grab.Rest, queue, pauses, cts.Token);
+        PipelineStats? stats = null;
+        try { stats = await task; }
+        catch (Exception ex) { Log.Write("<zh>" + ex); }
+        finally
+        {
+            if (session == _readSession)
+            {
+                _sink = null;
+                _readingSelection = false;
+                SetState(State.Idle);
+            }
+        }
+        if (session == _readSession && stats?.Error != null) FlashStatus("<zh>" + stats.Error, 6000);
+    }
+    private static async Task FetchRestAsync(Func<string?> rest, ClauseQueue queue, PauseSettings pauses, CancellationToken token)
+    {
+        try
+        {
+            string? more = await Task.Run(rest);
+            if (token.IsCancellationRequested || string.IsNullOrEmpty(more)) return;

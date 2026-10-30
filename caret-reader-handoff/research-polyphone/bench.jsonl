@@ -1,0 +1,5 @@
+{"mode": "old", "hanzi": 11346, "load_s": 1.23, "ms_per_1000": 25.0, "cpu_ms_per_1000": 16.3, "rss_after_imports_mb": 60, "peak_rss_mb": 119}
+{"mode": "A", "hanzi": 11346, "load_s": 1.59, "ms_per_1000": 20.8, "cpu_ms_per_1000": 9.4, "rss_after_imports_mb": 60, "peak_rss_mb": 163}
+{"mode": "AB", "hanzi": 11346, "load_s": 2.36, "ms_per_1000": 14.5, "cpu_ms_per_1000": 7.9, "rss_after_imports_mb": 60, "peak_rss_mb": 211}
+{"mode": "old", "hanzi": 11346, "load_s": 1.34, "ms_per_1000": 22.4, "cpu_ms_per_1000": 14.8, "rss_after_imports_mb": 60, "peak_rss_mb": 119}
+{"mode": "A", "hanzi": 11346, "load_s": 1.35, "ms_per_1000": 15.2, "cpu_ms_per_1000": 9.4, "rss_after_imports_mb": 60, "peak_rss_mb": 163}

@@ -1,0 +1,654 @@
+【第 1/3 部分，先只回复“收到1”，等第 3 部分发完再审查】
+Project: CaretReader v0.6 — tiny offline Windows 10/11 x64 TTS reader (C# .NET 8 WinForms, self-contained, cross-compiled on Linux; sherpa-onnx; NAudio WaveOutEvent; UIA COM via Interop.UIAutomationClient). Users: beginners on low-end PCs (4 GB RAM). The user has an eye condition. All previous features must stay (global hotkeys main=start/pause/resume, stop; voice packs folder + import; speaker preview; polyphone frontend; selection reading).
+
+USER BUG REPORT (v0.5, real Win11 25H2 PC):
+ (a) select text in a document, click our app's Start button -> "这个窗口不支持朗读 / 获取不到聚焦" (focus lost);
+ (b) put caret somewhere, click Start -> same;
+ (c) when our app is not in front, pressing the global hotkey also fails / does not read.
+v0.5 facts: main window was a WinForms bar with WS_EX_NOACTIVATE + WM_MOUSEACTIVATE->MA_NOACTIVATE, custom non-Selectable child controls (InkButton, InkDropDown opening a ContextMenuStrip); hotkeys via RegisterHotKey on the Form handle; foreground tracked by a 300 ms polling timer; grab = UIA GetFocusedElement on a thread-pool thread (1.5 s timeout) -> if focused element belongs to our process: give up; then clipboard fallback ONLY for "editor" windows (Edit/RichEdit/_WwG/Scintilla classes, notepad/winword/wordpad/wps processes, or UIA Edit/Document focusable); otherwise "这个窗口不支持朗读（焦点不在文字编辑框里）". Clipboard fallback waited up to 1.5 s for modifiers then gave up. No UIPI/elevation check.
+Our current root-cause analysis (please challenge it):
+ 1. Many targets fail regardless of focus: PDF readers (Adobe/Sumatra/Foxit) and many browser pages expose no TextPattern caret; the editor-only clipboard rule then refused them -> exactly the reported message.
+ 2. When our window did get activated (menu/dropdown/dialog, or MA_NOACTIVATE leaving the previous window deactivated with GetForegroundWindow()==0 — known Win32 behaviour), the polling-timer "last external window" and the GetForegroundWindow-based target were wrong/zero -> class "" -> refused. Subsequent hotkey presses also fail if the document was left inactive.
+ 3. Hotkey path: UIA cold-start can exceed 1.5 s on first call (Chrome builds its a11y tree lazily) -> timeout -> refused; with Ctrl+Alt still held, simulated Ctrl+C becomes Ctrl+Alt+C; elevated targets silently block UIA and SendInput (UIPI).
+ 4. Hotkey registered on a Form handle can be lost if WinForms recreates the handle.
+v0.6 fixes:
+ - Floating ball: layered window (UpdateLayeredWindow per-pixel alpha), WS_EX_NOACTIVATE|WS_EX_TOOLWINDOW|WS_EX_LAYERED (+TopMost), MA_NOACTIVATE, NO child controls at all. Default bottom-right, draggable, position remembered, tray icon to find it again.
+ - FocusTracker: SetWinEventHook(EVENT_SYSTEM_FOREGROUND, EVENT_OBJECT_FOCUS, WINEVENT_OUTOFCONTEXT|SKIPOWNPROCESS) remembers last external top-level + focused child.
+ - Target captured at trigger time (hotkey: foreground at WM_HOTKEY; click: foreground at WM_LBUTTONDOWN; if foreground is ours -> tracker's last window). If our process is foreground at grab time -> SetForegroundWindow(target) and wait until it is really foreground (<=600 ms).
+ - UIA on one dedicated long-lived MTA thread with a job queue, warm-up at startup, timeout 3 s first call / 1.5 s later; if the focused element's pid != target pid -> ElementFromHandle(target focus hwnd via GetGUIThreadInfo) and search ancestors / first descendant with IsTextPatternAvailable.
+ - Integrity-level check (TokenIntegrityLevel) -> explicit "run as administrator" message.
+ - Clipboard: WaitModifiersReleased (1.2 s, then inject key-ups with a 0xE8 mask key to avoid Alt menu activation); ensure target is foreground before SendInput; "selection probe" (Ctrl+C only) now allowed in every non-blocked app (browsers, PDF readers); Ctrl+Shift+End caret-to-end still only for editors (browsers' Document no longer counts as editor). If no selection in a caret-less app -> message "please select text first".
+ - Hotkeys registered on a dedicated message-only NativeWindow (HWND_MESSAGE).
+ - Interaction: single click = start (idle) / pause (reading, immediate) / resume (paused, deferred by system double-click time); double click = stop; right click = menu (voice + preview popup, import, always-on-top toggle, appearance pet/ball, settings, about, exit); drag to move.
+ - Mascot (a small person reading a book; first draft was a cat): pre-rendered 10-frame sprite sheet (160 px cells, 52 KB PNG embedded), scaled once per DPI; idle mostly static (blink every 3–7 s, page turn every 15–30 s); reading = mouth frame from audio peak level every 100 ms, redraw only when the frame changes; no timer when paused/loading/simple-ball/locked/fullscreen. "Simple ball" appearance = zero animation.
+Points to debate:
+ * The user suggested running UIA calls "on an STA thread with timeout". We use one dedicated MTA thread (Microsoft guidance: UIA clients should not run on the UI STA; MTA avoids event deadlocks). Argue which is right.
+ * Round-1 reviewer claimed: (C1) WinEventProc delegate may be GC'd — we store it in a readonly field _proc; (C2) IsWindow/GetForegroundWindow/SetForegroundWindow imports missing — they are declared in Native.cs (partial class, not shown); (C3) BLENDFUNCTION not initialised — check BallRenderer.Present; (C4) VK 0xE8 mask key may type characters — it is the unassigned VK AutoHotkey uses for exactly this; (C5) should call AllowSetForegroundWindow before SetForegroundWindow — note we are the background process when restoring; (C6) IntegrityLevelOf returns raw RID compared to 0/1 — we compare RIDs to RIDs (0x2000/0x3000; -1 = token not readable, now treated as 'probably elevated' only if UIA also failed). Confirm or refute each with code, do not repeat a claim the code already answers.
+ * Not yet run on real Windows (no free Windows CI available to us). Point out anything that is most likely to break on a real Win10/11 PC first.
+Code below is minified: comments removed, Chinese user-facing strings replaced by "<zh>" (not bugs).
+Reviewer instructions: Do NOT just agree with me or with the user. Be skeptical and argue objectively for the best deliverable for a beginner user with weak eyes on old PCs. Find real bugs: Win32/WinForms pitfalls with layered + no-activate windows (ContextMenuStrip on a WS_EX_NOACTIVATE owner, MessageBox owner, mouse capture, MouseLeave, DPI change, ULW with Form.Location), threading (UI vs UIA MTA thread vs thread pool; COM objects crossing threads; the UIA queue when a call hangs), focus restoration races, SendInput/clipboard edge cases, hotkey edge cases, GDI handle leaks, timers/CPU when idle, anything that could crash. Say if a design choice is wrong and what is better. Cite code; give confidence (high/med/low); concrete fixes. Be concise. Markdown: ## Critical ## Important ## Minor ## Design objections ## Correct as-is
+
+
+Other reviewers so far (Groq gpt-oss-120b, Agnes agnes-3.0-pro; NVIDIA models timed out). Adopted: IUIAutomation2 ConnectionTimeout 1.5 s / TransactionTimeout 3 s; ReleaseDC in finally; UIPI: token unreadable (-1) + UIA failed => 'run as admin' message. Rejected (with reason): WinEventProc GC (kept in field), BLENDFUNCTION (initialised), AllowSetForegroundWindow (we only restore while we are foreground), VK 0xE8 (unassigned VK), FocusTracker race (OUTOFCONTEXT callbacks run on the hooking UI thread), clipboard on MTA (continuations resume on UI thread), NAudio buffer overflow (pipeline caps 8 s ahead). Please also look at the attached mascot image (a small person reading; 10 frames: idle, blink, page1-3, talk0-2, look, sleep) at its real size of 60 px and judge readability.
+
+
+CODE (minified):
+
+===== NativeEx.cs =====
+using System.Runtime.InteropServices;
+namespace CaretReader.App;
+internal static partial class Native
+{
+    public const int WS_EX_TOPMOST = 0x00000008;
+    public const int WS_EX_TOOLWINDOW = 0x00000080;
+    public const int WS_EX_LAYERED = 0x00080000;
+    public const int WS_EX_TRANSPARENT = 0x00000020;
+    public const int WM_NCHITTEST = 0x0084, HTCLIENT = 1;
+    public const int WM_DISPLAYCHANGE = 0x007E, WM_DPICHANGED = 0x02E0;
+    public static readonly IntPtr HWND_TOPMOST = new(-1), HWND_NOTOPMOST = new(-2);
+    public const uint SWP_NOSIZE = 0x0001, SWP_NOMOVE = 0x0002, SWP_NOACTIVATE = 0x0010, SWP_SHOWWINDOW = 0x0040, SWP_NOOWNERZORDER = 0x0200;
+    [DllImport("user32.dll", SetLastError = true)]
+    public static extern bool SetWindowPos(IntPtr hWnd, IntPtr after, int x, int y, int cx, int cy, uint flags);
+    [DllImport("user32.dll")] public static extern IntPtr GetAncestor(IntPtr hwnd, uint flags);
+    public const uint GA_ROOT = 2;
+    [DllImport("user32.dll")] public static extern bool IsWindowVisible(IntPtr h);
+    [DllImport("user32.dll")] public static extern bool IsIconic(IntPtr h);
+    [DllImport("user32.dll")] public static extern uint GetDpiForWindow(IntPtr h);
+    public const uint EVENT_SYSTEM_FOREGROUND = 0x0003, EVENT_OBJECT_FOCUS = 0x8005;
+    public const uint WINEVENT_OUTOFCONTEXT = 0x0000, WINEVENT_SKIPOWNPROCESS = 0x0002;
+    public delegate void WinEventProc(IntPtr hook, uint ev, IntPtr hwnd, int idObject, int idChild, uint thread, uint time);
+    [DllImport("user32.dll")]
+    public static extern IntPtr SetWinEventHook(uint min, uint max, IntPtr hmod, WinEventProc proc, uint pid, uint tid, uint flags);
+    [DllImport("user32.dll")] public static extern bool UnhookWinEvent(IntPtr hook);
+    [StructLayout(LayoutKind.Sequential)]
+    public struct RECTI { public int Left, Top, Right, Bottom; }
+    [StructLayout(LayoutKind.Sequential)]
+    public struct GUITHREADINFO_FULL
+    {
+        public int cbSize, flags;
+        public IntPtr hwndActive, hwndFocus, hwndCapture, hwndMenuOwner, hwndMoveSize, hwndCaret;
+        public RECTI rcCaret;
+    }
+    [DllImport("user32.dll", EntryPoint = "GetGUIThreadInfo")]
+    private static extern bool GetGUIThreadInfoFull(uint idThread, ref GUITHREADINFO_FULL info);
+    public static (IntPtr focus, IntPtr caret) ThreadFocusOf(IntPtr anyWindowOfThread)
+    {
+        if (anyWindowOfThread == IntPtr.Zero) return (IntPtr.Zero, IntPtr.Zero);
+        uint tid = GetWindowThreadProcessId(anyWindowOfThread, out _);
+        var info = new GUITHREADINFO_FULL { cbSize = Marshal.SizeOf<GUITHREADINFO_FULL>() };
+        return GetGUIThreadInfoFull(tid, ref info) ? (info.hwndFocus, info.hwndCaret) : (IntPtr.Zero, IntPtr.Zero);
+    }
+    [StructLayout(LayoutKind.Sequential)] public struct POINT { public int X, Y; }
+    [StructLayout(LayoutKind.Sequential)] public struct SIZE { public int cx, cy; }
+    [StructLayout(LayoutKind.Sequential, Pack = 1)]
+    public struct BLENDFUNCTION { public byte BlendOp, BlendFlags, SourceConstantAlpha, AlphaFormat; }
+    public const int ULW_ALPHA = 2;
+    public const byte AC_SRC_OVER = 0, AC_SRC_ALPHA = 1;
+    [DllImport("user32.dll", SetLastError = true)]
+    public static extern bool UpdateLayeredWindow(IntPtr hwnd, IntPtr hdcDst, ref POINT pptDst, ref SIZE psize, IntPtr hdcSrc,
+                                                  ref POINT pprSrc, int crKey, ref BLENDFUNCTION pblend, int dwFlags);
+    [DllImport("user32.dll")] public static extern IntPtr GetDC(IntPtr hWnd);
+    [DllImport("user32.dll")] public static extern int ReleaseDC(IntPtr hWnd, IntPtr hDC);
+    [DllImport("gdi32.dll")] public static extern IntPtr CreateCompatibleDC(IntPtr hDC);
+    [DllImport("gdi32.dll")] public static extern bool DeleteDC(IntPtr hdc);
+    [DllImport("gdi32.dll")] public static extern IntPtr SelectObject(IntPtr hDC, IntPtr hObject);
+    [DllImport("gdi32.dll")] public static extern bool DeleteObject(IntPtr hObject);
+    [StructLayout(LayoutKind.Sequential)]
+    public struct BITMAPINFOHEADER
+    {
+        public int biSize, biWidth, biHeight; public short biPlanes, biBitCount; public int biCompression, biSizeImage, biXPelsPerMeter, biYPelsPerMeter, biClrUsed, biClrImportant;
+    }
+    [DllImport("gdi32.dll")]
+    public static extern IntPtr CreateDIBSection(IntPtr hdc, ref BITMAPINFOHEADER bmi, uint usage, out IntPtr bits, IntPtr hSection, uint offset);
+    [DllImport("user32.dll")] private static extern uint GetGuiResources(IntPtr hProcess, uint flags);
+    public static uint GdiObjects() { try { return GetGuiResources(System.Diagnostics.Process.GetCurrentProcess().Handle, 0); } catch { return 0; } }
+    [DllImport("shell32.dll")] private static extern int SHQueryUserNotificationState(out int state);
+    public static bool ForegroundIsFullscreen()
+    {
+        try
+        {
+            if (SHQueryUserNotificationState(out int s) == 0)
+                return s is 2 /*BUSY 全屏*/ or 3 /*D3D 全屏*/ or 4 /*演示模式*/;
+        }
+        catch { }
+        return false;
+    }
+    [DllImport("kernel32.dll", SetLastError = true)] private static extern IntPtr OpenProcess(uint access, bool inherit, uint pid);
+    [DllImport("kernel32.dll")] private static extern bool CloseHandle(IntPtr h);
+    [DllImport("advapi32.dll", SetLastError = true)] private static extern bool OpenProcessToken(IntPtr proc, uint access, out IntPtr token);
+    [DllImport("advapi32.dll", SetLastError = true)]
+    private static extern bool GetTokenInformation(IntPtr token, int cls, IntPtr info, int len, out int retLen);
+    [DllImport("advapi32.dll")] private static extern IntPtr GetSidSubAuthority(IntPtr sid, uint n);
+    [DllImport("advapi32.dll")] private static extern IntPtr GetSidSubAuthorityCount(IntPtr sid);
+    [DllImport("kernel32.dll")] private static extern IntPtr GetCurrentProcess();
+    private const uint PROCESS_QUERY_LIMITED_INFORMATION = 0x1000, TOKEN_QUERY = 0x0008;
+    private const int TokenIntegrityLevel = 25;
+    public static int IntegrityLevelOf(uint pid)
+    {
+        IntPtr proc = pid == (uint)Environment.ProcessId ? GetCurrentProcess() : OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid);
+        if (proc == IntPtr.Zero) return -1;
+        try
+        {
+            if (!OpenProcessToken(proc, TOKEN_QUERY, out var tok)) return -1;
+            try
+            {
+                GetTokenInformation(tok, TokenIntegrityLevel, IntPtr.Zero, 0, out int len);
+                if (len <= 0) return -1;
+                IntPtr buf = Marshal.AllocHGlobal(len);
+                try
+                {
+                    if (!GetTokenInformation(tok, TokenIntegrityLevel, buf, len, out _)) return -1;
+                    IntPtr sid = Marshal.ReadIntPtr(buf);
+                    int count = Marshal.ReadByte(GetSidSubAuthorityCount(sid));
+                    return Marshal.ReadInt32(GetSidSubAuthority(sid, (uint)(count - 1)));
+                }
+                finally { Marshal.FreeHGlobal(buf); }
+            }
+            finally { CloseHandle(tok); }
+        }
+        finally { if (pid != (uint)Environment.ProcessId) CloseHandle(proc); }
+    }
+    [DllImport("user32.dll")] private static extern void keybd_event(byte vk, byte scan, uint flags, UIntPtr extra);
+    private const uint KEYEVENTF_KEYUP_ = 0x0002;
+    public static async Task<bool> WaitModifiersReleasedAsync(int maxMs)
+    {
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        while (AnyModifierDown() && sw.ElapsedMilliseconds < maxMs) await Task.Delay(15);
+        if (!AnyModifierDown()) return true;
+        keybd_event(0xE8, 0, 0, UIntPtr.Zero);
+        keybd_event(0xE8, 0, KEYEVENTF_KEYUP_, UIntPtr.Zero);
+        foreach (byte vk in new byte[] { 0xA2, 0xA3, 0xA4, 0xA5, 0xA0, 0xA1, 0x5B, 0x5C })
+            if ((GetAsyncKeyState(vk) & 0x8000) != 0) keybd_event(vk, 0, KEYEVENTF_KEYUP_, UIntPtr.Zero);
+        await Task.Delay(40);
+        return !AnyModifierDown();
+    }
+    [DllImport("user32.dll")] private static extern bool AllowSetForegroundWindow(int pid);
+    [DllImport("user32.dll")] public static extern bool BringWindowToTop(IntPtr h);
+    public static async Task<bool> RestoreForegroundAsync(IntPtr h, int maxMs)
+    {
+        if (h == IntPtr.Zero || !IsWindow(h)) return false;
+        if (GetForegroundWindow() == h) return true;
+        if (IsIconic(h)) return false;
+        SetForegroundWindow(h);
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        while (sw.ElapsedMilliseconds < maxMs)
+        {
+            if (GetForegroundWindow() == h) { await Task.Delay(60); return true; }
+            await Task.Delay(20);
+        }
+        return GetForegroundWindow() == h;
+    }
+}
+
+===== FocusTracker.cs =====
+using CaretReader.Core;
+namespace CaretReader.App;
+internal sealed class FocusTracker : IDisposable
+{
+    private readonly Native.WinEventProc _proc;
+    private IntPtr _hookFg, _hookFocus;
+    public IntPtr LastWindow { get; private set; }
+    public IntPtr LastFocus { get; private set; }
+    public DateTime LastAt { get; private set; }
+    public event Action? ForegroundChanged;
+    public FocusTracker()
+    {
+        _proc = OnEvent;
+        _hookFg = Native.SetWinEventHook(Native.EVENT_SYSTEM_FOREGROUND, Native.EVENT_SYSTEM_FOREGROUND, IntPtr.Zero, _proc, 0, 0,
+                                         Native.WINEVENT_OUTOFCONTEXT | Native.WINEVENT_SKIPOWNPROCESS);
+        _hookFocus = Native.SetWinEventHook(Native.EVENT_OBJECT_FOCUS, Native.EVENT_OBJECT_FOCUS, IntPtr.Zero, _proc, 0, 0,
+                                            Native.WINEVENT_OUTOFCONTEXT | Native.WINEVENT_SKIPOWNPROCESS);
+        if (_hookFg == IntPtr.Zero) Log.Write("<zh>");
+        Update(Native.GetForegroundWindow());
+    }
+    private void OnEvent(IntPtr hook, uint ev, IntPtr hwnd, int idObject, int idChild, uint thread, uint time)
+    {
+        try
+        {
+            if (ev == Native.EVENT_SYSTEM_FOREGROUND)
+            {
+                Update(hwnd);
+                ForegroundChanged?.Invoke();
+            }
+            else if (ev == Native.EVENT_OBJECT_FOCUS && hwnd != IntPtr.Zero)
+            {
+                var root = Native.GetAncestor(hwnd, Native.GA_ROOT);
+                if (root != IntPtr.Zero && root == Native.GetForegroundWindow() && !IsOwn(root))
+                {
+                    LastWindow = root; LastFocus = hwnd; LastAt = DateTime.Now;
+                }
+            }
+        }
+        catch { /* 钩子回调里绝不能抛异常 */ }
+    }
+    public void Update(IntPtr fg)
+    {
+        if (fg == IntPtr.Zero || IsOwn(fg)) return;
+        if (fg != LastWindow) LastFocus = IntPtr.Zero;
+        LastWindow = fg;
+        var (focus, _) = Native.ThreadFocusOf(fg);
+        if (focus != IntPtr.Zero) LastFocus = focus;
+        LastAt = DateTime.Now;
+    }
+    public static bool IsOwn(IntPtr h)
+    {
+        if (h == IntPtr.Zero) return false;
+        Native.GetWindowThreadProcessId(h, out uint pid);
+        return pid == (uint)Environment.ProcessId;
+    }
+    public void Dispose()
+    {
+        if (_hookFg != IntPtr.Zero) { Native.UnhookWinEvent(_hookFg); _hookFg = IntPtr.Zero; }
+        if (_hookFocus != IntPtr.Zero) { Native.UnhookWinEvent(_hookFocus); _hookFocus = IntPtr.Zero; }
+    }
+}
+
+===== HotkeyWindow.cs =====
+using CaretReader.Core;
+namespace CaretReader.App;
+internal sealed class HotkeyWindow : NativeWindow, IDisposable
+{
+    private static readonly IntPtr HWND_MESSAGE = new(-3);
+    public event Action<int, long>? Pressed;
+    public HotkeyWindow()
+    {
+        CreateHandle(new CreateParams { Caption = "CaretReaderHotkeys", Parent = HWND_MESSAGE });
+    }
+    protected override void WndProc(ref Message m)
+    {
+        if (m.Msg == Native.WM_HOTKEY)
+        {
+            long at = System.Diagnostics.Stopwatch.GetTimestamp();
+            try { Pressed?.Invoke((int)m.WParam, at); }
+            catch (Exception ex) { Log.Write("<zh>" + ex); }
+            return;
+        }
+        base.WndProc(ref m);
+    }
+    public void Dispose()
+    {
+        try { Hotkey.Unregister(Handle, Hotkey.MainId); Hotkey.Unregister(Handle, Hotkey.StopId); } catch { }
+        DestroyHandle();
+    }
+}
+
+===== InteractionRules.cs =====
+namespace CaretReader.Core;
+public sealed class ClickClassifier
+{
+    public enum Action { PauseNow, DeferSingle, Double }
+    private readonly int _doubleMs, _slop;
+    private long _lastAt = long.MinValue / 2;
+    private int _lastX, _lastY;
+    public ClickClassifier(int doubleClickMs, int slopPx)
+    {
+        _doubleMs = Math.Clamp(doubleClickMs, 200, 900);
+        _slop = Math.Max(4, slopPx);
+    }
+    public int DeferMs => Math.Min(_doubleMs, 700);
+    public Action OnClick(long nowMs, int x, int y, bool reading)
+    {
+        bool dbl = nowMs - _lastAt <= _doubleMs && Math.Abs(x - _lastX) <= _slop && Math.Abs(y - _lastY) <= _slop;
+        if (dbl)
+        {
+            _lastAt = long.MinValue / 2;
+            return Action.Double;
+        }
+        _lastAt = nowMs; _lastX = x; _lastY = y;
+        return reading ? Action.PauseNow : Action.DeferSingle;
+    }
+}
+public static class ClipboardRules
+{
+    public const int UiaEdit = 50004, UiaDocument = 50030;
+    public static readonly HashSet<string> BlockedClasses = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "ConsoleWindowClass", "CASCADIA_HOSTING_WINDOW_CLASS", "PseudoConsoleWindow", "mintty", "VirtualConsoleClass",
+        "PuTTY", "CabinetWClass", "ExploreWClass", "Progman", "WorkerW", "Shell_TrayWnd", "Shell_SecondaryTrayWnd",
+        "SysListView32", "SysTreeView32", "DirectUIHWND",
+    };
+    public static readonly HashSet<string> BlockedProcesses = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "cmd", "powershell", "pwsh", "WindowsTerminal", "OpenConsole", "conhost", "wt", "explorer", "putty", "kitty",
+        "mintty", "ConEmu", "ConEmu64", "alacritty", "wezterm-gui", "Taskmgr", "wsl", "bash", "ssh", "MobaXterm", "Tabby",
+        "Hyper", "WinSCP", "mstsc", "vmconnect", "VirtualBoxVM", "vmware-vmx", "TeamViewer", "AnyDesk", "SunloginClient",
+    };
+    public static readonly HashSet<string> EditorClasses = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "Edit", "RichEdit20A", "RichEdit20W", "RichEdit50W", "RICHEDIT60W", "RichEditD2DPT", "_WwG", "Scintilla",
+    };
+    public static readonly HashSet<string> EditorProcesses = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "notepad", "winword", "wordpad", "wps", "et", "notepad++", "sublime_text", "Code", "Typora", "Obsidian",
+    };
+    public static readonly HashSet<string> Browsers = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "msedge", "chrome", "firefox", "360se", "360chrome", "QQBrowser", "SogouExplorer", "brave", "opera", "vivaldi",
+    };
+    public static (bool allowed, bool caretToEnd, string? refuse) Decide(
+        string foregroundClass, string focusClass, string process, int uiaControlType, bool uiaFocusable)
+    {
+        if (BlockedClasses.Contains(foregroundClass) || BlockedClasses.Contains(focusClass) || BlockedProcesses.Contains(process))
+            return (false, false, "<zh>");
+        bool browser = Browsers.Contains(process);
+        bool uiaEditor = uiaFocusable && (uiaControlType == UiaEdit || (uiaControlType == UiaDocument && !browser));
+        bool editor = uiaEditor || EditorClasses.Contains(focusClass) || EditorProcesses.Contains(process);
+        return (true, editor, null);
+    }
+}
+
+===== CaretTextGrabber.cs =====
+using System.Diagnostics;
+using System.Text;
+using CaretReader.Core;
+using UIA = Interop.UIAutomationClient;
+namespace CaretReader.App;
+internal sealed class CaretTextGrabber
+{
+    public const int MaxChars = 100_000;
+    public const int FirstChunkChars = 2000;
+    public const int UiaTimeoutMs = 1500, UiaFirstTimeoutMs = 3000;
+    private static UIA.IUIAutomation? _uia;
+    private static bool _uiaWarm;
+    public sealed record Result(string? Text, string Method, string? Detail, Func<string?>? Rest = null)
+    {
+        public bool Unsupported { get; init; }
+        public bool Selection { get; init; }
+        public bool NoCaret { get; init; }
+    }
+    private sealed record UiaOutcome(Result Result, int ControlType, bool Focusable);
+    public sealed record Target(IntPtr Window, IntPtr Focus, string Trigger)
+    {
+        public string ForegroundClass { get; init; } = "";
+        public string FocusClass { get; init; } = "";
+        public string Process { get; init; } = "?";
+        public uint Pid { get; init; }
+        public override string ToString() => $"{Process} [{ForegroundClass} / {FocusClass}]（{Trigger}）";
+        public static Target Describe(IntPtr window, IntPtr focus, string trigger)
+        {
+            if (focus == IntPtr.Zero && window != IntPtr.Zero) focus = Native.ThreadFocusOf(window).focus;
+            string proc = "?";
+            uint pid = 0;
+            try
+            {
+                Native.GetWindowThreadProcessId(window, out pid);
+                if (pid != 0) proc = System.Diagnostics.Process.GetProcessById((int)pid).ProcessName;
+            }
+            catch { }
+            return new Target(window, focus, trigger)
+            {
+                ForegroundClass = Native.ClassNameOf(window),
+                FocusClass = Native.ClassNameOf(focus != IntPtr.Zero ? focus : window),
+                Process = proc,
+                Pid = pid,
+            };
+        }
+    }
+    private readonly SemaphoreSlim _gate = new(1, 1);
+    private static readonly bool TestLog = Environment.GetEnvironmentVariable("CARETREADER_TESTLOG") == "1";
+    private static readonly System.Collections.Concurrent.BlockingCollection<Action> UiaQueue = new();
+    private static volatile bool _uiaBusy;
+    static CaretTextGrabber()
+    {
+        var t = new Thread(() =>
+        {
+            foreach (var job in UiaQueue.GetConsumingEnumerable())
+            {
+                _uiaBusy = true;
+                try { job(); } catch (Exception ex) { Log.Write("<zh>" + ex.Message); }
+                finally { _uiaBusy = false; }
+            }
+        }) { IsBackground = true, Name = "UIA" };
+        t.SetApartmentState(ApartmentState.MTA);
+        t.Start();
+    }
+    private static Task<T> RunOnUia<T>(Func<T> f)
+    {
+        var tcs = new TaskCompletionSource<T>(TaskCreationOptions.RunContinuationsAsynchronously);
+        UiaQueue.Add(() => { try { tcs.SetResult(f()); } catch (Exception ex) { tcs.SetException(ex); } });
+        return tcs.Task;
+    }
+    public static void WarmUp()
+    {
+        _ = RunOnUia(() =>
+        {
+            var sw = Stopwatch.StartNew();
+            try { _uia ??= CreateUia(); _uia.GetRootElement(); _ = _uia.GetFocusedElement(); _uiaWarm = true; }
+            catch (Exception ex) { Log.Write("<zh>" + ex.Message); }
+            Log.Write("<zh>");
+            return 0;
+        });
+    }
+    public async Task<Result> GrabAsync(Target target, CancellationToken token)
+    {
+        await _gate.WaitAsync(token);
+        try
+        {
+            if (target.Window == IntPtr.Zero || !Native.IsWindow(target.Window))
+                return new Result(null, "?", "<zh>") { Unsupported = true };
+            int own = Native.IntegrityLevelOf((uint)Environment.ProcessId);
+            int theirs = target.Pid == 0 ? 0 : Native.IntegrityLevelOf(target.Pid);
+            if (theirs == -1) Log.Write("<zh>");
+            if (own > 0 && theirs > own)
+            {
+                Log.Write("<zh>");
+                return ElevatedResult(target);
+            }
+            bool maybeElevated = theirs == -1 && own > 0 && own < 0x3000;
+            if (FocusTracker.IsOwn(Native.GetForegroundWindow()))
+            {
+                bool ok = await Native.RestoreForegroundAsync(target.Window, 600);
+                Log.Write("<zh>"成功" : "失败")}");
+            }
+            if (Native.GetForegroundWindow() != target.Window)
+                Log.Write("<zh>");
+            int timeout = _uiaWarm ? UiaTimeoutMs : UiaFirstTimeoutMs;
+            UiaOutcome? u = null;
+            if (_uiaBusy)
+                Log.Write("<zh>");
+            else
+            {
+                var uiaTask = RunOnUia(() => TryUia(target));
+                var done = await Task.WhenAny(uiaTask, Task.Delay(timeout, token));
+                token.ThrowIfCancellationRequested();
+                if (done == uiaTask && uiaTask.Status == TaskStatus.RanToCompletion)
+                {
+                    u = uiaTask.Result;
+                    _uiaWarm = true;
+                    if (u.Result.Text != null) { TestDump(u.Result); return u.Result; }
+                    Log.Write("<zh>");
+                }
+                else Log.Write("<zh>");
+            }
+            if (maybeElevated)
+            {
+                Log.Write("<zh>");
+                return ElevatedResult(target);
+            }
+            var (allowed, caretToEnd, refuse) = ClipboardPolicy(target, u);
+            if (!allowed)
+            {
+                Log.Write("<zh>");
+                return new Result(null, "<zh>", refuse) { Unsupported = true };
+            }
+            Log.Write("<zh>"选中 / 光标到文末" : "只探测选中"<zh>");
+            var r = await TryClipboardAsync(target, caretToEnd);
+            TestDump(r);
+            return r;
+        }
+        finally
+        {
+            _gate.Release();
+        }
+    }
+    private static Result ElevatedResult(Target target) =>
+        new(null, "<zh>", "<zh>" +
+                          "<zh>") { Unsupported = true };
+    private static void TestDump(Result r)
+    {
+        if (!TestLog) return;
+        string t = r.Text ?? "(null)";
+        t = t.Replace("\r", "\\r").Replace("\n", "\\n");
+        Log.Write("<zh>");
+    }
+    private static (bool allowed, bool caretToEnd, string? refuse) ClipboardPolicy(Target t, UiaOutcome? u)
+        => ClipboardRules.Decide(t.ForegroundClass, t.FocusClass, t.Process, u?.ControlType ?? 0, u?.Focusable ?? false);
+    private static UiaOutcome TryUia(Target target)
+    {
+        int controlType = 0;
+        bool focusable = false;
+        try
+        {
+            _uia ??= CreateUia();
+            UIA.IUIAutomationElement? el = null;
+            string source = "<zh>";
+            try { el = _uia.GetFocusedElement(); } catch { }
+            uint elPid = 0;
+            try { if (el != null) elPid = (uint)el.CurrentProcessId; } catch { el = null; }
+            if (el == null || (target.Pid != 0 && elPid != target.Pid))
+            {
+                IntPtr h = target.Focus != IntPtr.Zero && Native.IsWindow(target.Focus) ? target.Focus : target.Window;
+                try { el = _uia.ElementFromHandle(h); source = "<zh>"; } catch { el = null; }
+                if (el == null) return new UiaOutcome(new Result(null, "UIA", "<zh>"), 0, false);
+            }
+            try { controlType = el.CurrentControlType; focusable = el.CurrentIsKeyboardFocusable != 0; } catch { }
+            string who = "<zh>";
+            var walker = _uia.RawViewWalker;
+            var probe = el;
+            for (int depth = 0; probe != null && depth < 4; depth++)
+            {
+                var r = TryTextPattern(probe, who + "<zh>");
+                if (r != null) return new UiaOutcome(r, controlType, focusable);
+                try { probe = walker.GetParentElement(probe); } catch { probe = null; }
+            }
+            if (source != "<zh>")
+            {
+                try
+                {
+                    var cond = _uia.CreatePropertyCondition(UIA.UIA_PropertyIds.UIA_IsTextPatternAvailablePropertyId, true);
+                    var child = el.FindFirst(UIA.TreeScope.TreeScope_Descendants, cond);
+                    if (child != null)
+                    {
+                        var r = TryTextPattern(child, who + "<zh>");
+                        if (r != null) return new UiaOutcome(r, controlType, focusable);
+                    }
+                }
+                catch { }
+            }
+            return new UiaOutcome(new Result(null, "UIA", who + "<zh>"), controlType, focusable);
+        }
+        catch (Exception ex)
+        {
+            return new UiaOutcome(new Result(null, "UIA", "<zh>" + ex.Message), controlType, focusable);
+        }
+    }
+    private static Result? TryTextPattern(UIA.IUIAutomationElement el, string who)
+    {
+        if (el.GetCurrentPattern(UIA.UIA_PatternIds.UIA_TextPatternId) is not UIA.IUIAutomationTextPattern tp) return null;
+        UIA.IUIAutomationTextRange? start = null;
+        try
+        {
+            var sel = tp.GetSelection();
+            if (sel != null && sel.Length > 0)
+            {
+                start = sel.GetElement(0);
+                string? selected = ReadSelection(sel);
+                if (selected != null)
+                    return new Result(selected, "UIA", who + "<zh>") { Selection = true };
+            }
+        }
+        catch { /* 有的控件不支持 GetSelection */ }
+        if (start == null && el.GetCurrentPattern(UIA.UIA_PatternIds.UIA_TextPattern2Id) is UIA.IUIAutomationTextPattern2 tp2)
+        {
+            try { start = tp2.GetCaretRange(out _); } catch { }
+        }
+        if (start == null) return null;
+        var range = start.Clone();
+        range.MoveEndpointByRange(UIA.TextPatternRangeEndpoint.TextPatternRangeEndpoint_End, tp.DocumentRange,
+                                  UIA.TextPatternRangeEndpoint.TextPatternRangeEndpoint_End);
+        return ReadInTwoSteps(range, who);
+    }
+    private static string SafePid(UIA.IUIAutomationElement el)
+    {
+        try { return el.CurrentProcessId.ToString(); } catch { return "?"; }
+    }
+    private static string? ReadSelection(UIA.IUIAutomationTextRangeArray sel)
+    {
+        var sb = new StringBuilder();
+        for (int i = 0; i < sel.Length && i < 64 && sb.Length < MaxChars; i++)
+        {
+            string t;
+            try { t = sel.GetElement(i).GetText(MaxChars - sb.Length) ?? ""; }
+            catch { continue; }
+            if (t.Length == 0) continue;
+            if (sb.Length > 0) sb.Append('\n');
+            sb.Append(t);
+        }
+        string text = Clean(sb.ToString());
+        return string.IsNullOrWhiteSpace(text) ? null : text;
+    }
+    private static Result ReadInTwoSteps(UIA.IUIAutomationTextRange range, string who)
+    {
+        string first = range.GetText(FirstChunkChars) ?? "";
+        if (first.Length != FirstChunkChars)
+        {
+            if (first.Length > MaxChars) first = first.Substring(0, MaxChars);
+            return new Result(Clean(first), "UIA", who);
+        }
+        int cut = first.LastIndexOfAny(new[] { '。', '！', '？', '!', '?', '\n', '\r' });
+        string head = cut >= 200 ? first.Substring(0, cut + 1) : first;
+        string? Rest()
+        {
+            try
+            {
+                string all = range.GetText(MaxChars) ?? "";
+                if (!all.StartsWith(head, StringComparison.Ordinal))
+                {
+                    Log.Write("<zh>");
+                    return null;
+                }
+                return Clean(all.Substring(head.Length));
+            }
+            catch (Exception ex)
+            {
+                Log.Write("<zh>" + ex.Message);
+                return null;
+            }
+        }
+        return new Result(Clean(head), "UIA", who + "<zh>", Rest);
+    }
+    private static UIA.IUIAutomation CreateUia()
+    {
+        foreach (var clsid in new[] { "e22ad333-b25f-460c-83d0-0581107395c9", "ff48dba4-60ef-4201-aa87-54103eef594e" })
+        {
+            try
+            {
+                var t = Type.GetTypeFromCLSID(new Guid(clsid), throwOnError: true)!;
+                return (UIA.IUIAutomation)Activator.CreateInstance(t)!;
+            }
+            catch { }
+        }
+        throw new InvalidOperationException("<zh>");
+    }
+    private static string SafeClass(UIA.IUIAutomationElement el)
+    {
+        try { return el.CurrentClassName ?? "?"; } catch { return "?"; }
+    }
+    private static readonly HashSet<string> LineCopyClasses = new(StringComparer.OrdinalIgnoreCase) { "Scintilla" };
+    private static readonly HashSet<string> LineCopyProcesses = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "notepad++", "sublime_text", "Code", "devenv", "idea64", "pycharm64", "webstorm64", "rider64", "atom", "zed",
+    };
+    private static async Task<Result> TryClipboardAsync(Target target, bool caretToEnd)
+    {
+        if (!await Native.WaitModifiersReleasedAsync(1200))
+            return new Result(null, "<zh>", "<zh>");
+        if (Native.GetForegroundWindow() != target.Window && !await Native.RestoreForegroundAsync(target.Window, 600))
+            return new Result(null, "<zh>", "<zh>") { Unsupported = true };
+        var sw = Stopwatch.StartNew();
+        var (backupOk, backup) = BackupClipboard();
+        if (!backupOk && Native.CountClipboardFormats() > 0)
+            return new Result(null, "<zh>", "<zh>");
+        uint seq0 = Native.GetClipboardSequenceNumber();
+        if (!LineCopyClasses.Contains(target.FocusClass) && !LineCopyProcesses.Contains(target.Process))
+        {

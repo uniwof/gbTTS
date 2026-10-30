@@ -1,0 +1,407 @@
+【第 3/3 部分】
+===== BallRenderer.cs =====
+using System.Drawing.Drawing2D;
+using System.Drawing.Imaging;
+using System.Reflection;
+using System.Text.Json;
+using CaretReader.Core;
+namespace CaretReader.App.Ui;
+internal sealed class BallRenderer : IDisposable
+{
+    public enum Look { Pet, Ball }
+    private readonly Bitmap? _sheet;
+    private readonly int _cell;
+    private readonly Dictionary<string, int> _index = new(StringComparer.OrdinalIgnoreCase);
+    private Bitmap[]? _scaled;
+    private int _size;
+    private int _pad;
+    private IntPtr _memDc, _dib, _oldBmp, _bits;
+    private Bitmap? _canvas;
+    private int _canvasW;
+    public int WindowSize => _size + _pad * 2;
+    public BallRenderer()
+    {
+        try
+        {
+            var asm = Assembly.GetExecutingAssembly();
+            using var png = asm.GetManifestResourceStream("sprites.png");
+            using var json = asm.GetManifestResourceStream("sprites.json");
+            if (png != null && json != null)
+            {
+                using var tmp = new Bitmap(png);
+                _sheet = new Bitmap(tmp.Width, tmp.Height, PixelFormat.Format32bppPArgb);
+                using (var g = Graphics.FromImage(_sheet)) g.DrawImage(tmp, 0, 0, tmp.Width, tmp.Height);
+                using var doc = JsonDocument.Parse(json);
+                _cell = doc.RootElement.GetProperty("cell").GetInt32();
+                foreach (var p in doc.RootElement.GetProperty("frames").EnumerateObject()) _index[p.Name] = p.Value.GetInt32();
+            }
+        }
+        catch (Exception ex) { Log.Write("<zh>" + ex.Message); _sheet = null; }
+    }
+    public bool HasPet => _sheet != null;
+    public void EnsureSize(int diameter)
+    {
+        int pad = Math.Max(3, diameter / 14);
+        if (diameter == _size && pad == _pad && _canvas != null) return;
+        _size = diameter; _pad = pad;
+        if (_scaled != null) foreach (var b in _scaled) b.Dispose();
+        _scaled = null;
+        if (_sheet != null)
+        {
+            int n = _sheet.Width / _cell;
+            _scaled = new Bitmap[n];
+            for (int i = 0; i < n; i++)
+            {
+                var b = new Bitmap(diameter, diameter, PixelFormat.Format32bppPArgb);
+                using var g = Graphics.FromImage(b);
+                g.InterpolationMode = InterpolationMode.HighQualityBicubic;
+                g.PixelOffsetMode = PixelOffsetMode.HighQuality;
+                g.CompositingMode = CompositingMode.SourceCopy;
+                g.DrawImage(_sheet, new Rectangle(0, 0, diameter, diameter), new Rectangle(i * _cell, 0, _cell, _cell), GraphicsUnit.Pixel);
+                _scaled[i] = b;
+            }
+        }
+        CreateCanvas(WindowSize);
+    }
+    public int FrameOf(string name) => _index.TryGetValue(name, out int i) ? i : 0;
+    private void CreateCanvas(int w)
+    {
+        FreeCanvas();
+        var bmi = new Native.BITMAPINFOHEADER
+        {
+            biSize = System.Runtime.InteropServices.Marshal.SizeOf<Native.BITMAPINFOHEADER>(),
+            biWidth = w, biHeight = -w,
+            biPlanes = 1, biBitCount = 32,
+        };
+        IntPtr screen = Native.GetDC(IntPtr.Zero);
+        _memDc = Native.CreateCompatibleDC(screen);
+        _dib = Native.CreateDIBSection(screen, ref bmi, 0, out _bits, IntPtr.Zero, 0);
+        Native.ReleaseDC(IntPtr.Zero, screen);
+        _oldBmp = Native.SelectObject(_memDc, _dib);
+        _canvas = new Bitmap(w, w, w * 4, PixelFormat.Format32bppPArgb, _bits);
+        _canvasW = w;
+    }
+    private void FreeCanvas()
+    {
+        _canvas?.Dispose(); _canvas = null;
+        if (_memDc != IntPtr.Zero)
+        {
+            Native.SelectObject(_memDc, _oldBmp);
+            Native.DeleteObject(_dib);
+            Native.DeleteDC(_memDc);
+            _memDc = _dib = IntPtr.Zero;
+        }
+    }
+    public void Present(IntPtr hwnd, Point screenPos, Look look, int frame, double? progress, string? badge, string glyph, bool hover)
+    {
+        if (_canvas == null) return;
+        using (var g = Graphics.FromImage(_canvas))
+        {
+            g.CompositingMode = CompositingMode.SourceCopy;
+            g.Clear(Color.Transparent);
+            g.CompositingMode = CompositingMode.SourceOver;
+            g.SmoothingMode = SmoothingMode.AntiAlias;
+            var ball = new Rectangle(_pad, _pad, _size, _size);
+            if (look == Look.Pet && _scaled != null && frame >= 0 && frame < _scaled.Length)
+                g.DrawImageUnscaled(_scaled[frame], _pad, _pad);
+            else
+                DrawSimpleBall(g, ball, glyph);
+            if (hover)
+            {
+                using var hp = new Pen(Color.FromArgb(150, 128, 128, 128), Math.Max(1.5f, _pad * 0.45f));
+                g.DrawEllipse(hp, _pad * 0.45f, _pad * 0.45f, _canvasW - _pad * 0.9f - 1, _canvasW - _pad * 0.9f - 1);
+            }
+            if (progress is double p)
+            {
+                float w = Math.Max(2f, _pad * 0.8f);
+                var rr = new RectangleF(w / 2, w / 2, _canvasW - w - 1, _canvasW - w - 1);
+                using var bg = new Pen(Color.FromArgb(200, 232, 232, 232), w);
+                using var fg = new Pen(Ink.InkBlack, w) { StartCap = LineCap.Round, EndCap = LineCap.Round };
+                g.DrawEllipse(bg, rr);
+                g.DrawArc(fg, rr, -90, (float)(360 * Math.Clamp(p, 0.02, 1)));
+            }
+            if (badge == "pause") DrawPauseBadge(g);
+        }
+        var size = new Native.SIZE { cx = _canvasW, cy = _canvasW };
+        var dst = new Native.POINT { X = screenPos.X, Y = screenPos.Y };
+        var src = new Native.POINT();
+        var blend = new Native.BLENDFUNCTION { BlendOp = Native.AC_SRC_OVER, SourceConstantAlpha = 255, AlphaFormat = Native.AC_SRC_ALPHA };
+        IntPtr screen = Native.GetDC(IntPtr.Zero);
+        Native.UpdateLayeredWindow(hwnd, screen, ref dst, ref size, _memDc, ref src, 0, ref blend, Native.ULW_ALPHA);
+        Native.ReleaseDC(IntPtr.Zero, screen);
+    }
+    private void DrawSimpleBall(Graphics g, Rectangle r, string glyph)
+    {
+        using (var fill = new SolidBrush(Ink.PaperPure)) g.FillEllipse(fill, r);
+        float lw = Math.Max(1.5f, r.Width * 0.034f);
+        using (var pen = new Pen(Ink.InkBlack, lw)) g.DrawEllipse(pen, r.X + lw / 2, r.Y + lw / 2, r.Width - lw, r.Height - lw);
+        float cx = r.X + r.Width / 2f, cy = r.Y + r.Height / 2f, u = r.Width / 100f;
+        using var ink = new SolidBrush(Ink.InkBlack);
+        using var stroke = new Pen(Ink.InkBlack, 7 * u) { StartCap = LineCap.Round, EndCap = LineCap.Round };
+        switch (glyph)
+        {
+            case "wave":   // 朗读中：三道声波竖条
+                foreach (var (dx, h) in new[] { (-16f, 18f), (0f, 34f), (16f, 24f) })
+                    g.DrawLine(stroke, cx + dx * u, cy - h * u / 2, cx + dx * u, cy + h * u / 2);
+                break;
+            case "sleep":  // 加载中 / 没有音色：横线
+                g.DrawLine(stroke, cx - 18 * u, cy, cx + 18 * u, cy);
+                break;
+            default:
+                g.DrawLine(stroke, cx, cy - 22 * u, cx, cy + 22 * u);
+                g.DrawLine(stroke, cx - 10 * u, cy - 22 * u, cx + 10 * u, cy - 22 * u);
+                g.DrawLine(stroke, cx - 10 * u, cy + 22 * u, cx + 10 * u, cy + 22 * u);
+                break;
+        }
+    }
+    private void DrawPauseBadge(Graphics g)
+    {
+        float d = _size * 0.36f;
+        float x = _pad + _size - d * 0.92f, y = _pad + _size - d * 0.92f;
+        using (var b = new SolidBrush(Ink.InkBlack)) g.FillEllipse(b, x, y, d, d);
+        using (var w = new Pen(Color.White, Math.Max(1.2f, d * 0.06f))) g.DrawEllipse(w, x, y, d, d);
+        float bw = d * 0.13f, bh = d * 0.42f, cy = y + d / 2;
+        using var wb = new SolidBrush(Color.White);
+        g.FillRectangle(wb, x + d * 0.33f - bw / 2, cy - bh / 2, bw, bh);
+        g.FillRectangle(wb, x + d * 0.67f - bw / 2, cy - bh / 2, bw, bh);
+    }
+    public void Dispose()
+    {
+        FreeCanvas();
+        if (_scaled != null) foreach (var b in _scaled) b.Dispose();
+        _sheet?.Dispose();
+    }
+}
+
+===== Bubble.cs =====
+namespace CaretReader.App.Ui;
+internal sealed class Bubble : Form
+{
+    private string _text = "";
+    private readonly System.Windows.Forms.Timer _hide = new();
+    private static Font? _font;
+    private static Font BubbleFont => _font ??= new Font(Ink.FontFamilyName, 11f, FontStyle.Regular, GraphicsUnit.Point);
+    public Bubble()
+    {
+        FormBorderStyle = FormBorderStyle.None;
+        ShowInTaskbar = false;
+        StartPosition = FormStartPosition.Manual;
+        AutoScaleMode = AutoScaleMode.None;
+        BackColor = Color.White;
+        DoubleBuffered = true;
+        TopMost = true;
+        _hide.Tick += (_, _) => { _hide.Stop(); HideNow(); };
+    }
+    protected override CreateParams CreateParams
+    {
+        get
+        {
+            var cp = base.CreateParams;
+            cp.ExStyle |= Native.WS_EX_NOACTIVATE | Native.WS_EX_TOOLWINDOW | Native.WS_EX_TOPMOST | Native.WS_EX_TRANSPARENT;
+            return cp;
+        }
+    }
+    protected override bool ShowWithoutActivation => true;
+    protected override void WndProc(ref Message m)
+    {
+        if (m.Msg == Native.WM_MOUSEACTIVATE) { m.Result = (IntPtr)Native.MA_NOACTIVATE; return; }
+        base.WndProc(ref m);
+    }
+    public bool Showing => Visible && _text.Length > 0;
+    public string CurrentText => _text;
+    public void ShowNear(Rectangle anchor, string text, int ms)
+    {
+        _text = text;
+        int pad = Ink.S(this, 12);
+        int maxW = Ink.S(this, 380);
+        var sz = TextRenderer.MeasureText(text, BubbleFont, new Size(maxW - pad * 2, 2000), TextFormatFlags.WordBreak);
+        var size = new Size(Math.Min(maxW, sz.Width + pad * 2 + 2), sz.Height + pad * 2);
+        var wa = Screen.FromRectangle(anchor).WorkingArea;
+        int gap = Ink.S(this, 8);
+        var pos = new Point(anchor.Left - gap - size.Width, anchor.Bottom - size.Height);
+        if (pos.X < wa.Left) pos.X = anchor.Right + gap;
+        if (pos.X + size.Width > wa.Right) { pos.X = Math.Max(wa.Left, anchor.Right - size.Width); pos.Y = anchor.Top - gap - size.Height; }
+        if (pos.Y < wa.Top) pos.Y = anchor.Bottom + gap;
+        pos.Y = Math.Clamp(pos.Y, wa.Top, Math.Max(wa.Top, wa.Bottom - size.Height));
+        pos.X = Math.Clamp(pos.X, wa.Left, Math.Max(wa.Left, wa.Right - size.Width));
+        bool sizeChanged = Size != size;
+        Bounds = new Rectangle(pos, size);
+        if (sizeChanged) Ink.RoundWindow(this);
+        if (!Visible) Native.SetWindowPos(Handle, Native.HWND_TOPMOST, pos.X, pos.Y, size.Width, size.Height,
+                                          Native.SWP_NOACTIVATE | Native.SWP_SHOWWINDOW);
+        Visible = true;
+        Invalidate();
+        _hide.Stop();
+        if (ms > 0) { _hide.Interval = ms; _hide.Start(); }
+    }
+    public void HideNow()
+    {
+        _hide.Stop();
+        _text = "";
+        if (Visible) Hide();
+    }
+    protected override void OnPaint(PaintEventArgs e)
+    {
+        var g = e.Graphics;
+        var r = ClientRectangle;
+        g.Clear(Color.White);
+        Ink.Border(g, r, Ink.InkBlack);
+        int pad = Ink.S(this, 12);
+        TextRenderer.DrawText(g, _text, BubbleFont, Rectangle.Inflate(r, -pad, -pad), Ink.InkBlack,
+                              TextFormatFlags.WordBreak | TextFormatFlags.Left | TextFormatFlags.Top);
+    }
+    protected override void Dispose(bool disposing)
+    {
+        if (disposing) _hide.Dispose();
+        base.Dispose(disposing);
+    }
+}
+
+===== NAudioSink.cs =====
+using System.Diagnostics;
+using CaretReader.Core;
+using NAudio.Wave;
+namespace CaretReader.App;
+internal sealed class NAudioSink : IAudioSink, IDisposable
+{
+    private readonly object _gate = new();
+    private WaveOutEvent? _out;
+    private BufferedWaveProvider? _buf;
+    private readonly Stopwatch _emptySince = new();
+    private bool _stopped;
+    private bool _paused;
+    public bool IsPaused { get { lock (_gate) return _paused; } }
+    private LevelMeter? _meter;
+    public float Level => IsPaused ? 0f : (_meter?.Level ?? 0f);
+    private sealed class LevelMeter : IWaveProvider
+    {
+        private readonly IWaveProvider _src;
+        private volatile float _level;
+        public LevelMeter(IWaveProvider src) => _src = src;
+        public WaveFormat WaveFormat => _src.WaveFormat;
+        public float Level => _level;
+        public int Read(byte[] buffer, int offset, int count)
+        {
+            int n = _src.Read(buffer, offset, count);
+            int peak = 0;
+            for (int i = offset; i + 1 < offset + n; i += 2)
+            {
+                int v = Math.Abs((int)(short)(buffer[i] | (buffer[i + 1] << 8)));
+                if (v > peak) peak = v;
+            }
+            _level = peak / 32768f;
+            return n;
+        }
+    }
+    public void Begin(int sampleRate)
+    {
+        lock (_gate)
+        {
+            if (_stopped) return;
+            _buf = new BufferedWaveProvider(new WaveFormat(sampleRate, 16, 1))
+            {
+                BufferDuration = TimeSpan.FromSeconds(90),
+                DiscardOnBufferOverflow = false,
+                ReadFully = true,
+            };
+            var output = new WaveOutEvent { DesiredLatency = 200, NumberOfBuffers = 3 };
+            try
+            {
+                _meter = new LevelMeter(_buf);
+                output.Init(_meter);
+                if (!_paused) output.Play();
+            }
+            catch (Exception ex)
+            {
+                try { output.Dispose(); } catch { }
+                _buf = null;
+                throw new InvalidOperationException(FriendlyAudioError(ex), ex);
+            }
+            _out = output;
+        }
+    }
+    private static string FriendlyAudioError(Exception ex)
+    {
+        string m = ex.Message ?? "";
+        if (m.Contains("NoDriver", StringComparison.OrdinalIgnoreCase) || m.Contains("BadDeviceId", StringComparison.OrdinalIgnoreCase))
+            return "<zh>";
+        if (m.Contains("Allocated", StringComparison.OrdinalIgnoreCase))
+            return "<zh>";
+        return "<zh>" + m;
+    }
+    public void Pause()
+    {
+        lock (_gate)
+        {
+            if (_stopped || _paused) return;
+            _paused = true;
+            try { _out?.Pause(); } catch { }
+        }
+    }
+    public void Resume()
+    {
+        lock (_gate)
+        {
+            if (_stopped || !_paused) return;
+            _paused = false;
+            _emptySince.Reset();
+            try { _out?.Play(); } catch { }
+        }
+    }
+    public void Write(float[] samples)
+    {
+        var bytes = new byte[samples.Length * 2];
+        for (int i = 0; i < samples.Length; i++)
+        {
+            float f = samples[i];
+            if (f > 1f) f = 1f; else if (f < -1f) f = -1f;
+            short v = (short)(f * 32767f);
+            bytes[2 * i] = (byte)v;
+            bytes[2 * i + 1] = (byte)(v >> 8);
+        }
+        lock (_gate)
+        {
+            if (_stopped || _buf == null) return;
+            _buf.AddSamples(bytes, 0, bytes.Length);
+            _emptySince.Reset();
+        }
+    }
+    public double BufferedSeconds
+    {
+        get { lock (_gate) return _buf?.BufferedDuration.TotalSeconds ?? 0; }
+    }
+    public bool IsDrained
+    {
+        get
+        {
+            lock (_gate)
+            {
+                if (_stopped || _buf == null) return true;
+                if (_paused) { _emptySince.Reset(); return false; }
+                if (_buf.BufferedBytes > 0) { _emptySince.Reset(); return false; }
+                if (!_emptySince.IsRunning) _emptySince.Start();
+                return _emptySince.ElapsedMilliseconds > 400;
+            }
+        }
+    }
+    public void Stop()
+    {
+        lock (_gate)
+        {
+            _stopped = true;
+            try { _out?.Stop(); } catch { }
+            try { _out?.Dispose(); } catch { }
+            _out = null;
+            _buf?.ClearBuffer();
+            _buf = null;
+        }
+    }
+    public void Dispose() => Stop();
+}
+
+
+现在三部分都发完了（同一个程序的全部相关源码）。请你作为严格的 Win32/WinForms/UI Automation 资深审查者，不要附和我，也不要附和用户的要求，客观找出：
+1) 我们对聚焦 bug 根因的分析哪里错了或漏了；
+2) 代码里的真实 bug（分层窗口 + 不激活窗口 + ContextMenuStrip/MessageBox、鼠标捕获、DPI、UIA 线程与超时、前台恢复竞态、SendInput/剪贴板、全局快捷键、GDI 泄漏、空闲 CPU、崩溃路径）；
+3) 设计上你反对的地方和更好的做法。
+每条给出代码位置、把握程度（高/中/低）和具体改法。按 ## Critical ## Important ## Minor ## Design objections ## Correct as-is 输出，简洁但完整。不要调用检索工具，直接根据上面贴出的代码回答。

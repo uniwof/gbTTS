@@ -1,0 +1,42 @@
+name: wintest
+on: [push, workflow_dispatch]
+jobs:
+  t:
+    runs-on: windows-latest
+    timeout-minutes: 50
+    steps:
+    - name: run
+      shell: powershell
+      env:
+        B_URL: https://temp.sh/lvnFg/b6.zip
+        S_URL: https://temp.sh/USzMd/s.zip
+        TARGETS: notepad,wordpad,chromehtml,edgehtml,edgepdf,sumatra
+        TOPIC: crt-b697bf0039a0
+      run: |
+        $ProgressPreference='SilentlyContinue'
+        New-Item -ItemType Directory -Force C:\CRT | Out-Null
+        curl.exe -s -X POST -o C:\CRT\b.zip $env:B_URL
+        curl.exe -s -X POST -o C:\CRT\s.zip $env:S_URL
+        Expand-Archive C:\CRT\b.zip C:\CRT -Force
+        Expand-Archive C:\CRT\s.zip C:\CRT -Force
+        curl.exe -s -d "started" "https://ntfy.sh/$env:TOPIC"
+        & C:\CRT\prep.ps1 *> C:\CRT\results_env.txt
+        & C:\CRT\audio.ps1 *>> C:\CRT\results_env.txt
+        & C:\CRT\run.ps1 -App C:\CRT\v05 -Tag v05 -Targets $env:TARGETS.Split(',') -Mode bar -Shots
+        & C:\CRT\run.ps1 -App C:\CRT\v06 -Tag v06 -Targets $env:TARGETS.Split(',') -Mode ball -Shots
+        & C:\CRT\measure.ps1
+    - name: upload
+      if: always()
+      shell: powershell
+      env:
+        TOPIC: crt-b697bf0039a0
+      run: |
+        Get-Process CaretReader -EA 0 | Stop-Process -Force
+        New-Item -ItemType Directory -Force C:\OUT | Out-Null
+        Copy-Item C:\CRT\results_*.txt C:\OUT -EA 0
+        Copy-Item C:\CRT\v05\log.txt C:\OUT\log_v05.txt -EA 0
+        Copy-Item C:\CRT\v06\log.txt C:\OUT\log_v06.txt -EA 0
+        if (Test-Path C:\CRT\shots) { Copy-Item C:\CRT\shots C:\OUT\shots -Recurse }
+        Compress-Archive C:\OUT\* C:\out.zip -Force
+        $u = curl.exe -s -F file=@C:\out.zip https://temp.sh/upload
+        curl.exe -s -d "OUT $u" "https://ntfy.sh/$env:TOPIC"

@@ -1,0 +1,232 @@
+            _petFrame = _mouthLevel < 0.06f ? "talk0" : _mouthLevel < 0.22f ? "talk1" : "talk2";
+            Redraw();
+            return;
+        }
+        if (_state != State.Idle) { _anim.Stop(); return; }
+        if (_idleSeq == 0)
+        {
+            _idleSeq = _rnd.Next(5) == 0 ? 2 : 1;
+            _idleStep = 0;
+        }
+        string[] seq = _idleSeq == 1 ? new[] { "blink", "idle" } : new[] { "page1", "page2", "page3", "idle" };
+        _petFrame = seq[_idleStep];
+        Redraw();
+        _idleStep++;
+        if (_idleStep >= seq.Length)
+        {
+            _idleSeq = 0;
+            _nextIdleEvent = Environment.TickCount64 + (_rnd.Next(4) == 0 ? _rnd.Next(15000, 30000) : _rnd.Next(3000, 7000));
+            ScheduleAnim();
+        }
+        else _anim.Interval = _idleSeq == 1 ? 150 : 140;
+    }
+    protected override void OnMouseDown(MouseEventArgs e)
+    {
+        base.OnMouseDown(e);
+        _hoverTimer.Stop();
+        if (e.Button == MouseButtons.Left)
+        {
+            _leftDown = true;
+            _dragging = false;
+            _downScreen = Cursor.Position;
+            _downWindow = Location;
+            _clickTarget = CurrentTarget("<zh>");
+            Capture = true;
+        }
+    }
+    protected override void OnMouseMove(MouseEventArgs e)
+    {
+        base.OnMouseMove(e);
+        if (!_hover) { _hover = true; Redraw(); _hoverTimer.Start(); }
+        if (!_leftDown) return;
+        var p = Cursor.Position;
+        var drag = SystemInformation.DragSize;
+        if (!_dragging && (Math.Abs(p.X - _downScreen.X) > Math.Max(4, drag.Width) || Math.Abs(p.Y - _downScreen.Y) > Math.Max(4, drag.Height)))
+        {
+            _dragging = true;
+            _bubble.HideNow();
+            _singlePending = false; _clickTimer.Stop();
+        }
+        if (_dragging) Location = new Point(_downWindow.X + p.X - _downScreen.X, _downWindow.Y + p.Y - _downScreen.Y);
+    }
+    protected override void OnMouseUp(MouseEventArgs e)
+    {
+        base.OnMouseUp(e);
+        if (e.Button == MouseButtons.Left && _leftDown)
+        {
+            _leftDown = false;
+            Capture = false;
+            if (_dragging)
+            {
+                _dragging = false;
+                KeepOnScreen();
+                _settings.BallX = Left; _settings.BallY = Top;
+                try { _settings.Save(_settingsPath); } catch { }
+                return;
+            }
+            OnLeftClick(Cursor.Position);
+        }
+        else if (e.Button == MouseButtons.Right)
+        {
+            ShowMenu(Cursor.Position);
+        }
+    }
+    protected override void OnMouseLeave(EventArgs e)
+    {
+        base.OnMouseLeave(e);
+        _hover = false;
+        _hoverTimer.Stop();
+        if (_state is not State.Loading && !_importing && _bubble.Showing && _bubbleIsHover) _bubble.HideNow();
+        Redraw();
+    }
+    private void OnLeftClick(Point pt)
+    {
+        var dbl = SystemInformation.DoubleClickSize;
+        _clicks ??= new ClickClassifier(SystemInformation.DoubleClickTime, Math.Max(dbl.Width, dbl.Height));
+        switch (_clicks.OnClick(Environment.TickCount64, pt.X, pt.Y, reading: _state == State.Reading))
+        {
+            case ClickClassifier.Action.Double:
+                _singlePending = false; _clickTimer.Stop();
+                OnDoubleClickBall();
+                return;
+            case ClickClassifier.Action.PauseNow:
+                Log.Write("<zh>");
+                PauseReading();
+                return;
+            default:
+                _singlePending = true;
+                _clickTimer.Interval = _clicks.DeferMs;
+                _clickTimer.Stop(); _clickTimer.Start();
+                return;
+        }
+    }
+    private ClickClassifier? _clicks;
+    private void OnSingleClick()
+    {
+        Log.Write("<zh>");
+        var target = _clickTarget ?? CurrentTarget("<zh>");
+        _ = OnMainActionAsync(Stopwatch.GetTimestamp(), target);
+    }
+    private void OnDoubleClickBall()
+    {
+        Log.Write("<zh>");
+        if (_state is State.Grabbing or State.Reading or State.Paused) { StopReading(); FlashStatus("<zh>"); }
+        else FlashStatus("<zh>");
+    }
+    private void ShowMenu(Point screen)
+    {
+        _bubble.HideNow();
+        BuildMenu();
+        _menu.Show(screen);
+    }
+    private void BuildMenu()
+    {
+        _menu.Items.Clear();
+        int w = Ink.S(this, 260), h = Ink.S(this, 34);
+        ToolStripMenuItem Item(string text, Action? onClick, bool enabled = true, bool check = false)
+        {
+            var it = new ToolStripMenuItem((check ? "■  " : "    ") + text) { AutoSize = false, Width = w, Height = h, Enabled = enabled, TextAlign = ContentAlignment.MiddleLeft };
+            if (onClick != null) it.Click += (_, _) => onClick();
+            return it;
+        }
+        var head = Item(StatusText(), null, enabled: false);
+        _menu.Items.Add(head);
+        _menu.Items.Add(new ToolStripSeparator());
+        string act = _state switch { State.Reading or State.Grabbing => "<zh>", State.Paused => "<zh>", _ => "<zh>" };
+        bool canAct = _state is State.Idle or State.Reading or State.Paused or State.Grabbing;
+        _menu.Items.Add(Item(act, () => _ = OnMainActionAsync(Stopwatch.GetTimestamp(), CurrentTarget("<zh>")), canAct));
+        _menu.Items.Add(Item("<zh>", () => { StopReading(); FlashStatus("<zh>"); }, _state is State.Reading or State.Paused or State.Grabbing));
+        _menu.Items.Add(new ToolStripSeparator());
+        string voiceName = (_voiceMenu.SelectedItem as VoicePack)?.Name ?? "<zh>";
+        _menu.Items.Add(Item("<zh>", () => BeginInvoke(() => _voiceMenu.ShowAt(new Point(Left, Top))),
+                             _state != State.Loading && !_importing && _packs.Count > 0));
+        _menu.Items.Add(Item("<zh>", ImportVoices, _state != State.Loading && !_importing));
+        _menu.Items.Add(new ToolStripSeparator());
+        _menu.Items.Add(Item("<zh>", ToggleTopMost, check: _settings.TopMost));
+        _menu.Items.Add(Item("<zh>", () => SetAppearance("pet"), _render.HasPet, check: CurrentLook == BallRenderer.Look.Pet));
+        _menu.Items.Add(Item("<zh>", () => SetAppearance("ball"), check: CurrentLook == BallRenderer.Look.Ball));
+        _menu.Items.Add(new ToolStripSeparator());
+        _menu.Items.Add(Item("<zh>", OpenSettings, _state != State.Loading && !_importing));
+        _menu.Items.Add(Item("<zh>", () => { using var f = new AboutForm(); f.ShowDialog(this); ReturnFocus(); }));
+        _menu.Items.Add(Item("<zh>", Close));
+    }
+    private void ToggleTopMost()
+    {
+        _settings.TopMost = !_settings.TopMost;
+        TopMost = _settings.TopMost;
+        if (!_settings.TopMost) Native.SetWindowPos(Handle, Native.HWND_NOTOPMOST, 0, 0, 0, 0, Native.SWP_NOMOVE | Native.SWP_NOSIZE | Native.SWP_NOACTIVATE);
+        else ReassertTopMost();
+        try { _settings.Save(_settingsPath); } catch { }
+        FlashStatus(_settings.TopMost ? "<zh>" : "<zh>");
+    }
+    private void SetAppearance(string look)
+    {
+        _settings.Appearance = look;
+        try { _settings.Save(_settingsPath); } catch { }
+        _lastDrawnKey = "";
+        ScheduleAnim();
+        Log.Write("<zh>" + look);
+    }
+    private void SetupTray()
+    {
+        try
+        {
+            _tray = new NotifyIcon { Icon = Icon ?? SystemIcons.Application, Text = "<zh>", Visible = true };
+            _tray.MouseUp += (_, e) =>
+            {
+                if (e.Button == MouseButtons.Right) ShowMenu(Cursor.Position);
+                else if (e.Button == MouseButtons.Left)
+                {
+                    if (!Visible) Show();
+                    _settings.BallX = null; _settings.BallY = null;
+                    RestoreBallPosition();
+                    ReassertTopMost();
+                    FlashStatus("<zh>");
+                }
+            };
+        }
+        catch (Exception ex) { Log.Write("<zh>" + ex.Message); }
+    }
+    private bool _bubbleIsHover;
+    private void ShowStatusBubble()
+    {
+        if (_bubble.Showing && !_bubbleIsHover) return;
+        _bubbleIsHover = true;
+        _bubble.ShowNear(Bounds, StatusText() + "<zh>", 6000);
+    }
+    private void FlashStatus(string text, int ms = 4000)
+    {
+        if (IsDisposed) return;
+        _bubbleIsHover = false;
+        _bubble.ShowNear(Bounds, text, ms);
+    }
+    private string StopHint => _stopRegistered ? "<zh>" : "<zh>";
+    private string StatusText()
+    {
+        string ed = string.IsNullOrEmpty(_edition) ? "" : _edition + " · ";
+        return _state switch
+        {
+            State.NoModel => _packs.Count == 0 ? "<zh>" : "<zh>",
+            State.Loading => _progressText ?? "<zh>",
+            State.Idle => _mainRegistered ? "<zh>" : "<zh>",
+            State.Grabbing => "<zh>",
+            State.Reading => $"{(_readingSelection ? "朗读选中" : "朗读中"<zh>",
+            State.Paused => "<zh>",
+            _ => "",
+        };
+    }
+    private string? _progressText;
+    protected override async void OnShown(EventArgs e)
+    {
+        base.OnShown(e);
+        ReassertTopMost();
+        _tracker = new FocusTracker();
+        _tracker.ForegroundChanged += ReassertTopMost;
+        CaretTextGrabber.WarmUp();
+        SetupTray();
+        Redraw();
+        if (CrashGuard.PreviousCrashStage is string lastStage &&
+            !lastStage.Contains("<zh>") && !lastStage.Contains("<zh>") && !lastStage.Contains("<zh>"))
+        {
+            ShowError("<zh>" + lastStage + "）。\n\n" +
+                      "<zh>" +

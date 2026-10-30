@@ -1,0 +1,31 @@
+        if (_tray != null) { string t = "<zh>" + StatusText(); _tray.Text = t.Length > 63 ? t.Substring(0, 63) : t; }
+        ScheduleAnim();
+    }
+    private void ShowError(string message, bool info = false)
+    {
+        _bubble.HideNow();
+        MessageBox.Show(this, message, "<zh>", MessageBoxButtons.OK, info ? MessageBoxIcon.Information : MessageBoxIcon.Warning);
+        ReturnFocus();
+    }
+    private void ReturnFocus()
+    {
+        var h = _tracker?.LastWindow ?? IntPtr.Zero;
+        if (h != IntPtr.Zero && Native.IsWindow(h) && FocusTracker.IsOwn(Native.GetForegroundWindow()))
+            Native.SetForegroundWindow(h);
+    }
+    protected override void Dispose(bool disposing)
+    {
+        if (disposing)
+        {
+            _anim.Dispose(); _clickTimer.Dispose(); _hoverTimer.Dispose(); _progressTimer.Dispose();
+            _readCts?.Dispose();
+            _player.Dispose();
+            _render.Dispose();
+            _bubble.Dispose();
+            _menu.Dispose();
+            _voiceMenu.Dispose();
+            _hotkeys.Dispose();
+        }
+        base.Dispose(disposing);
+    }
+}

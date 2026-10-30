@@ -1,0 +1,463 @@
+===== MainForm.cs (window, rendering, mouse, menu, tray, bubble, hotkeys; reading/loading/import parts omitted, unchanged from v0.5) =====
+using System.Diagnostics;
+using System.Reflection;
+using CaretReader.App.Ui;
+using CaretReader.Core;
+namespace CaretReader.App;
+internal sealed class MainForm : Form
+{
+    private enum State { NoModel, Loading, Idle, Grabbing, Reading, Paused }
+    private State _state = State.NoModel;
+    private readonly string _appDir = AppContext.BaseDirectory;
+    private readonly string _settingsPath;
+    private AppSettings _settings;
+    private List<VoicePack> _packs = new();
+    private string _edition = "";
+    private string _lastScanProblems = "";
+    private readonly TtsEngine _engine = new();
+    private readonly SamplePlayer _player = new();
+    private bool _importing;
+    private bool _readingSelection;
+    private readonly CaretTextGrabber _grabber = new();
+    private Hotkey _hotkey = Hotkey.Default;
+    private Hotkey _stopHotkey = Hotkey.DefaultStop;
+    private bool _mainRegistered, _stopRegistered;
+    private readonly HotkeyWindow _hotkeys = new();
+    private CancellationTokenSource? _readCts;
+    private Task _readTask = Task.CompletedTask;
+    private int _readSession;
+    private NAudioSink? _sink;
+    private bool _pauseRequested;
+    private FocusTracker? _tracker;
+    private readonly System.Windows.Forms.Timer _anim = new();
+    private readonly System.Windows.Forms.Timer _clickTimer = new();
+    private readonly System.Windows.Forms.Timer _hoverTimer = new() { Interval = 700 };
+    private readonly System.Windows.Forms.Timer _progressTimer = new() { Interval = 80 };
+    private readonly Stopwatch _loadClock = new();
+    private double _loadExpectSeconds = 3;
+    private double? _progress;
+    private readonly BallRenderer _render = new();
+    private readonly Bubble _bubble = new();
+    private readonly InkDropDown _voiceMenu = new();
+    private readonly ContextMenuStrip _menu = new() { Renderer = new InkMenuRenderer(), ShowImageMargin = false, ShowCheckMargin = false };
+    private NotifyIcon? _tray;
+    private string _petFrame = "sleep";
+    private int _lastDrawnFrame = -1;
+    private string _lastDrawnKey = "";
+    private long _nextIdleEvent;
+    private int _idleSeq;
+    private int _idleStep;
+    private readonly Random _rnd = new();
+    private bool _hover;
+    private bool _sessionLocked;
+    private float _mouthLevel;
+    private bool _leftDown, _dragging;
+    private Point _downScreen, _downWindow;
+    private bool _singlePending;
+    private CaretTextGrabber.Target? _clickTarget;
+    public MainForm()
+    {
+        _settingsPath = AppSettings.ResolvePath(_appDir);
+        _settings = AppSettings.Load(_settingsPath);
+        Text = "<zh>";
+        FormBorderStyle = FormBorderStyle.None;
+        StartPosition = FormStartPosition.Manual;
+        AutoScaleMode = AutoScaleMode.None;
+        ShowInTaskbar = false;
+        TopMost = _settings.TopMost;
+        Font = Ink.UiFont;
+        try { Icon = Icon.ExtractAssociatedIcon(Environment.ProcessPath!); } catch { }
+        _voiceMenu.SelectedIndexChanged += async (_, _) => await OnVoiceChangedAsync();
+        _voiceMenu.Opening += (_, _) => RefreshVoices(tidy: false);
+        _voiceMenu.SpeakerClicked += PreviewVoice;
+        _voiceMenu.HasSample = o => o is VoicePack p && p.SamplePath != null;
+        _voiceMenu.IsPlaying = o => o is VoicePack p && _player.PlayingId == p.Id;
+        _voiceMenu.Tooltip = o => o is VoicePack p ? (string.IsNullOrWhiteSpace(p.Description) ? "" : p.Description + "\n") + "<zh>" : null;
+        _voiceMenu.MenuClosed += (_, _) => ReturnFocus();
+        _player.StateChanged += () => _voiceMenu.RefreshSpeakers();
+        _player.Failed += msg => FlashStatus(msg);
+        _hotkeys.Pressed += OnHotkey;
+        _anim.Tick += (_, _) => AnimTick();
+        _clickTimer.Tick += (_, _) => { _clickTimer.Stop(); if (_singlePending) { _singlePending = false; OnSingleClick(); } };
+        _hoverTimer.Tick += (_, _) => { _hoverTimer.Stop(); if (_hover && !_leftDown) ShowStatusBubble(); };
+        _progressTimer.Tick += (_, _) => UpdateLoadProgress();
+        _menu.Font = Ink.UiFont;
+        _menu.Closed += (_, _) => { ReturnFocus(); Redraw(); };
+        Microsoft.Win32.SystemEvents.SessionSwitch += OnSessionSwitch;
+        Microsoft.Win32.SystemEvents.DisplaySettingsChanged += OnDisplayChanged;
+    }
+    protected override CreateParams CreateParams
+    {
+        get
+        {
+            var cp = base.CreateParams;
+            cp.ExStyle |= Native.WS_EX_NOACTIVATE | Native.WS_EX_TOOLWINDOW | Native.WS_EX_LAYERED;
+            cp.ExStyle &= ~Native.WS_EX_APPWINDOW;
+            return cp;
+        }
+    }
+    protected override bool ShowWithoutActivation => true;
+    protected override void OnHandleCreated(EventArgs e)
+    {
+        base.OnHandleCreated(e);
+        ApplyBallSize();
+        RestoreBallPosition();
+    }
+    private int BallDiameter => Ink.S(this, 60);
+    private void ApplyBallSize()
+    {
+        _render.EnsureSize(BallDiameter);
+        Size = new Size(_render.WindowSize, _render.WindowSize);
+        _lastDrawnKey = "";
+    }
+    protected override void WndProc(ref Message m)
+    {
+        if (m.Msg == Native.WM_MOUSEACTIVATE)
+        {
+            m.Result = (IntPtr)Native.MA_NOACTIVATE;
+            return;
+        }
+        if (m.Msg == Native.WM_DPICHANGED)
+        {
+            base.WndProc(ref m);
+            BeginInvoke(() => { ApplyBallSize(); KeepOnScreen(); Redraw(); });
+            return;
+        }
+        base.WndProc(ref m);
+    }
+    private void RestoreBallPosition()
+    {
+        var wa = Screen.PrimaryScreen?.WorkingArea ?? new Rectangle(0, 0, 1280, 720);
+        int margin = Ink.S(this, 24);
+        var pos = new Point(wa.Right - Width - margin, wa.Bottom - Height - margin);
+        if (_settings.BallX is int x && _settings.BallY is int y)
+        {
+            var r = new Rectangle(x, y, Width, Height);
+            if (Screen.AllScreens.Any(s => s.WorkingArea.IntersectsWith(Rectangle.Inflate(r, -Width / 3, -Height / 3)))) pos = new Point(x, y);
+        }
+        Location = pos;
+        KeepOnScreen();
+    }
+    private void KeepOnScreen()
+    {
+        var wa = Screen.FromRectangle(Bounds).WorkingArea;
+        int x = Math.Clamp(Left, wa.Left, Math.Max(wa.Left, wa.Right - Width));
+        int y = Math.Clamp(Top, wa.Top, Math.Max(wa.Top, wa.Bottom - Height));
+        if (x != Left || y != Top) Location = new Point(x, y);
+    }
+    private void OnDisplayChanged(object? sender, EventArgs e)
+    {
+        if (IsDisposed) return;
+        BeginInvoke(() => { ApplyBallSize(); KeepOnScreen(); Redraw(); });
+    }
+    private void OnSessionSwitch(object? sender, Microsoft.Win32.SessionSwitchEventArgs e)
+    {
+        _sessionLocked = e.Reason is Microsoft.Win32.SessionSwitchReason.SessionLock or Microsoft.Win32.SessionSwitchReason.ConsoleDisconnect
+                                     or Microsoft.Win32.SessionSwitchReason.RemoteDisconnect;
+        if (!_sessionLocked && !IsDisposed) BeginInvoke(() => ScheduleAnim());
+    }
+    private void ReassertTopMost()
+    {
+        if (!_settings.TopMost || !IsHandleCreated) return;
+        Native.SetWindowPos(Handle, Native.HWND_TOPMOST, 0, 0, 0, 0, Native.SWP_NOMOVE | Native.SWP_NOSIZE | Native.SWP_NOACTIVATE);
+    }
+    private BallRenderer.Look CurrentLook => _settings.Appearance == "ball" || !_render.HasPet ? BallRenderer.Look.Ball : BallRenderer.Look.Pet;
+    private void Redraw()
+    {
+        if (!IsHandleCreated || IsDisposed) return;
+        string frameName = _state switch
+        {
+            State.NoModel or State.Loading => "sleep",
+            State.Grabbing => "look",
+            State.Paused => "look",
+            State.Reading => _petFrame.StartsWith("talk") ? _petFrame : "talk0",
+            _ => _petFrame is "idle" or "blink" or "page1" or "page2" or "page3" ? _petFrame : "idle",
+        };
+        string glyph = _state switch
+        {
+            State.NoModel or State.Loading => "sleep",
+            State.Reading or State.Grabbing => "wave",
+            _ => "caret",
+        };
+        string? badge = _state == State.Paused ? "pause" : null;
+        int frame = _render.FrameOf(frameName);
+        string key = $"{CurrentLook}|{frame}|{glyph}|{badge}|{_hover}|{(_progress is double p ? (int)(p * 100) : -1)}|{Left},{Top}";
+        if (key == _lastDrawnKey) return;
+        _lastDrawnKey = key;
+        _lastDrawnFrame = frame;
+        _render.Present(Handle, Location, CurrentLook, frame, _progress, badge, glyph, _hover);
+    }
+    protected override void OnMove(EventArgs e)
+    {
+        base.OnMove(e);
+        Redraw();
+    }
+    private void ScheduleAnim()
+    {
+        _anim.Stop();
+        if (CurrentLook != BallRenderer.Look.Pet || _sessionLocked || !Visible) { Redraw(); return; }
+        if (_state == State.Reading) { _anim.Interval = 100; _anim.Start(); return; }
+        if (_state == State.Idle)
+        {
+            long now = Environment.TickCount64;
+            if (_nextIdleEvent <= now) _nextIdleEvent = now + _rnd.Next(3000, 7000);
+            _anim.Interval = (int)Math.Clamp(_nextIdleEvent - now, 50, 10_000);
+            _anim.Start();
+        }
+        Redraw();
+    }
+    private void AnimTick()
+    {
+        if (_sessionLocked || Native.ForegroundIsFullscreen()) { _petFrame = _state == State.Reading ? "talk0" : "idle"; Redraw(); _anim.Interval = 1000; return; }
+        if (_state == State.Reading)
+        {
+            float lv = _sink?.Level ?? 0f;
+            _mouthLevel = Math.Max(lv, _mouthLevel * 0.55f);
+            _petFrame = _mouthLevel < 0.06f ? "talk0" : _mouthLevel < 0.22f ? "talk1" : "talk2";
+            Redraw();
+            return;
+        }
+        if (_state != State.Idle) { _anim.Stop(); return; }
+        if (_idleSeq == 0)
+        {
+            _idleSeq = _rnd.Next(5) == 0 ? 2 : 1;
+            _idleStep = 0;
+        }        string[] seq = _idleSeq == 1 ? new[] { "blink", "idle" } : new[] { "page1", "page2", "page3", "idle" };
+        _petFrame = seq[_idleStep];
+        Redraw();
+        _idleStep++;
+        if (_idleStep >= seq.Length)
+        {
+            _idleSeq = 0;
+            _nextIdleEvent = Environment.TickCount64 + (_rnd.Next(4) == 0 ? _rnd.Next(15000, 30000) : _rnd.Next(3000, 7000));
+            ScheduleAnim();
+        }
+        else _anim.Interval = _idleSeq == 1 ? 150 : 140;
+    }
+    protected override void OnMouseDown(MouseEventArgs e)
+    {
+        base.OnMouseDown(e);
+        _hoverTimer.Stop();
+        if (e.Button == MouseButtons.Left)
+        {
+            _leftDown = true;
+            _dragging = false;
+            _downScreen = Cursor.Position;
+            _downWindow = Location;
+            _clickTarget = CurrentTarget("<zh>");
+            Capture = true;
+        }
+    }
+    protected override void OnMouseMove(MouseEventArgs e)
+    {
+        base.OnMouseMove(e);
+        if (!_hover) { _hover = true; Redraw(); _hoverTimer.Start(); }
+        if (!_leftDown) return;
+        var p = Cursor.Position;
+        var drag = SystemInformation.DragSize;
+        if (!_dragging && (Math.Abs(p.X - _downScreen.X) > Math.Max(4, drag.Width) || Math.Abs(p.Y - _downScreen.Y) > Math.Max(4, drag.Height)))
+        {
+            _dragging = true;
+            _bubble.HideNow();
+            _singlePending = false; _clickTimer.Stop();
+        }
+        if (_dragging) Location = new Point(_downWindow.X + p.X - _downScreen.X, _downWindow.Y + p.Y - _downScreen.Y);
+    }
+    protected override void OnMouseUp(MouseEventArgs e)
+    {
+        base.OnMouseUp(e);
+        if (e.Button == MouseButtons.Left && _leftDown)
+        {
+            _leftDown = false;
+            Capture = false;
+            if (_dragging)
+            {
+                _dragging = false;
+                KeepOnScreen();
+                _settings.BallX = Left; _settings.BallY = Top;
+                try { _settings.Save(_settingsPath); } catch { }
+                return;
+            }
+            OnLeftClick(Cursor.Position);
+        }
+        else if (e.Button == MouseButtons.Right)
+        {
+            ShowMenu(Cursor.Position);
+        }
+    }
+    protected override void OnMouseLeave(EventArgs e)
+    {
+        base.OnMouseLeave(e);
+        _hover = false;
+        _hoverTimer.Stop();
+        if (_state is not State.Loading && !_importing && _bubble.Showing && _bubbleIsHover) _bubble.HideNow();
+        Redraw();
+    }
+    private void OnLeftClick(Point pt)
+    {
+        var dbl = SystemInformation.DoubleClickSize;
+        _clicks ??= new ClickClassifier(SystemInformation.DoubleClickTime, Math.Max(dbl.Width, dbl.Height));
+        switch (_clicks.OnClick(Environment.TickCount64, pt.X, pt.Y, reading: _state == State.Reading))
+        {
+            case ClickClassifier.Action.Double:
+                _singlePending = false; _clickTimer.Stop();
+                OnDoubleClickBall();
+                return;
+            case ClickClassifier.Action.PauseNow:
+                Log.Write("<zh>");
+                PauseReading();
+                return;
+            default:
+                _singlePending = true;
+                _clickTimer.Interval = _clicks.DeferMs;
+                _clickTimer.Stop(); _clickTimer.Start();
+                return;
+        }
+    }
+    private ClickClassifier? _clicks;
+    private void OnSingleClick()
+    {
+        Log.Write("<zh>");
+        var target = _clickTarget ?? CurrentTarget("<zh>");
+        _ = OnMainActionAsync(Stopwatch.GetTimestamp(), target);
+    }
+    private void OnDoubleClickBall()
+    {
+        Log.Write("<zh>");
+        if (_state is State.Grabbing or State.Reading or State.Paused) { StopReading(); FlashStatus("<zh>"); }
+        else FlashStatus("<zh>");
+    }
+    private void ShowMenu(Point screen)
+    {
+        _bubble.HideNow();
+        BuildMenu();
+        _menu.Show(screen);
+    }
+    private void BuildMenu()
+    {
+        _menu.Items.Clear();
+        int w = Ink.S(this, 260), h = Ink.S(this, 34);
+        ToolStripMenuItem Item(string text, Action? onClick, bool enabled = true, bool check = false)
+        {
+            var it = new ToolStripMenuItem((check ? "■  " : "    ") + text) { AutoSize = false, Width = w, Height = h, Enabled = enabled, TextAlign = ContentAlignment.MiddleLeft };
+            if (onClick != null) it.Click += (_, _) => onClick();
+            return it;
+        }
+        var head = Item(StatusText(), null, enabled: false);
+        _menu.Items.Add(head);
+        _menu.Items.Add(new ToolStripSeparator());
+        string act = _state switch { State.Reading or State.Grabbing => "<zh>", State.Paused => "<zh>", _ => "<zh>" };
+        bool canAct = _state is State.Idle or State.Reading or State.Paused or State.Grabbing;
+        _menu.Items.Add(Item(act, () => _ = OnMainActionAsync(Stopwatch.GetTimestamp(), CurrentTarget("<zh>")), canAct));
+        _menu.Items.Add(Item("<zh>", () => { StopReading(); FlashStatus("<zh>"); }, _state is State.Reading or State.Paused or State.Grabbing));
+        _menu.Items.Add(new ToolStripSeparator());
+        string voiceName = (_voiceMenu.SelectedItem as VoicePack)?.Name ?? "<zh>";
+        _menu.Items.Add(Item("<zh>", () => BeginInvoke(() => _voiceMenu.ShowAt(new Point(Left, Top))),
+                             _state != State.Loading && !_importing && _packs.Count > 0));
+        _menu.Items.Add(Item("<zh>", ImportVoices, _state != State.Loading && !_importing));
+        _menu.Items.Add(new ToolStripSeparator());
+        _menu.Items.Add(Item("<zh>", ToggleTopMost, check: _settings.TopMost));
+        _menu.Items.Add(Item("<zh>", () => SetAppearance("pet"), _render.HasPet, check: CurrentLook == BallRenderer.Look.Pet));
+        _menu.Items.Add(Item("<zh>", () => SetAppearance("ball"), check: CurrentLook == BallRenderer.Look.Ball));
+        _menu.Items.Add(new ToolStripSeparator());
+        _menu.Items.Add(Item("<zh>", OpenSettings, _state != State.Loading && !_importing));
+        _menu.Items.Add(Item("<zh>", () => { using var f = new AboutForm(); f.ShowDialog(this); ReturnFocus(); }));
+        _menu.Items.Add(Item("<zh>", Close));
+    }
+    private void ToggleTopMost()
+    {
+        _settings.TopMost = !_settings.TopMost;
+        TopMost = _settings.TopMost;
+        if (!_settings.TopMost) Native.SetWindowPos(Handle, Native.HWND_NOTOPMOST, 0, 0, 0, 0, Native.SWP_NOMOVE | Native.SWP_NOSIZE | Native.SWP_NOACTIVATE);
+        else ReassertTopMost();
+        try { _settings.Save(_settingsPath); } catch { }
+        FlashStatus(_settings.TopMost ? "<zh>" : "<zh>");
+    }
+    private void SetAppearance(string look)
+    {
+        _settings.Appearance = look;
+        try { _settings.Save(_settingsPath); } catch { }
+        _lastDrawnKey = "";
+        ScheduleAnim();
+        Log.Write("<zh>" + look);
+    }
+    private void SetupTray()
+    {
+        try
+        {
+            _tray = new NotifyIcon { Icon = Icon ?? SystemIcons.Application, Text = "<zh>", Visible = true };
+            _tray.MouseUp += (_, e) =>
+            {
+                if (e.Button == MouseButtons.Right) ShowMenu(Cursor.Position);
+                else if (e.Button == MouseButtons.Left)
+                {
+                    if (!Visible) Show();
+                    _settings.BallX = null; _settings.BallY = null;
+                    RestoreBallPosition();
+                    ReassertTopMost();
+                    FlashStatus("<zh>");
+                }
+            };
+        }
+        catch (Exception ex) { Log.Write("<zh>" + ex.Message); }
+    }
+    private bool _bubbleIsHover;
+    private void ShowStatusBubble()
+    {
+        if (_bubble.Showing && !_bubbleIsHover) return;
+        _bubbleIsHover = true;
+        _bubble.ShowNear(Bounds, StatusText() + "<zh>", 6000);
+    }
+    private void FlashStatus(string text, int ms = 4000)
+    {
+        if (IsDisposed) return;
+        _bubbleIsHover = false;
+        _bubble.ShowNear(Bounds, text, ms);
+    }
+    private string StopHint => _stopRegistered ? "<zh>" : "<zh>";
+    private string StatusText()
+    {
+        string ed = string.IsNullOrEmpty(_edition) ? "" : _edition + " · ";
+        return _state switch
+        {
+            State.NoModel => _packs.Count == 0 ? "<zh>" : "<zh>",
+            State.Loading => _progressText ?? "<zh>",
+            State.Idle => _mainRegistered ? "<zh>" : "<zh>",
+            State.Grabbing => "<zh>",
+            State.Reading => $"{(_readingSelection ? "朗读选中" : "朗读中"<zh>",
+            State.Paused => "<zh>",
+            _ => "",
+        };
+    }
+    private string? _progressText;
+    protected override async void OnShown(EventArgs e)
+    {
+        base.OnShown(e);
+        ReassertTopMost();
+        _tracker = new FocusTracker();
+        _tracker.ForegroundChanged += ReassertTopMost;
+        CaretTextGrabber.WarmUp();
+        SetupTray();
+        Redraw();
+        if (CrashGuard.PreviousCrashStage is string lastStage &&
+            !lastStage.Contains("<zh>") && !lastStage.Contains("<zh>") && !lastStage.Contains("<zh>"))
+        {
+            ShowError("<zh>" + lastStage + "）。\n\n" +
+                      "<zh>" +
+                      "<zh>");
+        }
+        CrashGuard.Mark("<zh>");
+        try { _edition = File.ReadAllText(Path.Combine(_appDir, "edition.txt")).Trim(); } catch { _edition = ""; }
+        if (_edition.Length > 12) _edition = _edition.Substring(0, 12);
+        if (_edition != "") { Text = "<zh>" + _edition; if (_tray != null) _tray.Text = Text; }
+        VoiceImporter.CleanupTemp(_appDir);
+        RefreshVoices(tidy: true);
+        CrashGuard.Mark("<zh>");
+        ApplyHotkeys(_settings.Hotkey, _settings.StopHotkey, showErrors: true);
+        if (_packs.Count == 0)
+        {
+            SetState(State.NoModel);
+            ShowError("<zh>" +
+                      "<zh>");
+            return;
+        }

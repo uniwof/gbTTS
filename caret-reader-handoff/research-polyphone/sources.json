@@ -1,0 +1,63 @@
+{
+ "pinyin-pro complete(jieba词表)": {
+  "tier": "A",
+  "entries": 337385,
+  "poly_entries": 266713
+ },
+ "phrase-pinyin-data pinyin.txt": {
+  "tier": "A",
+  "entries": 47111,
+  "poly_entries": 45502
+ },
+ "phrase-pinyin-data zdic_cibs": {
+  "tier": "B",
+  "entries": 348446,
+  "poly_entries": 243710
+ },
+ "phrase-pinyin-data zdic_cybs(成语)": {
+  "tier": "B",
+  "entries": 32569,
+  "poly_entries": 29670
+ },
+ "chinese-xinhua idiom.json(成语)": {
+  "tier": "B",
+  "entries": 30297,
+  "poly_entries": 27578
+ },
+ "pinyin-pro modern(现汉7)": {
+  "tier": "B",
+  "entries": 51815,
+  "poly_entries": 37492
+ },
+ "PaddleSpeech polyphonic.yaml": {
+  "tier": "A",
+  "entries": 52,
+  "poly_entries": 52
+ },
+ "phrase-pinyin-data di.txt": {
+  "tier": "A",
+  "entries": 6839,
+  "poly_entries": 6839
+ },
+ "phrase-pinyin-data overwrite.txt": {
+  "tier": "A",
+  "entries": 850,
+  "poly_entries": 843
+ },
+ "merged_A": {
+  "all_words": 347534,
+  "kept_poly_words": 276693
+ },
+ "merged_AB": {
+  "all_words": 592724,
+  "kept_poly_words": 441312
+ },
+ "PaddleSpeech must_neural_tone_words": {
+  "tier": "A",
+  "entries": 417
+ },
+ "pinyin-data pinyin.txt(单字)": {
+  "tier": "A",
+  "entries": 44435
+ }
+}
