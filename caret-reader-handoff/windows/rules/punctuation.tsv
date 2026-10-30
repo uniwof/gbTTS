@@ -1,0 +1,51 @@
+# 内置标点表（文档 5.6.1）。列：符号	前停顿(秒)	后停顿(秒)	类别	备注
+# 用户改动另存为 data/用户标点表.tsv（只存改过的行）。尖括号是特殊位置。
+，	0	0.15	Comma	
+,	0	0.15	Comma	
+、	0	0.12	Comma	
+。	0	0.45	Period	
+.	0	0.45	Period	
+！	0	0.45	Period	
+!	0	0.45	Period	
+？	0	0.5	Period	
+?	0	0.5	Period	
+；	0	0.3	Semicolon	
+;	0	0.3	Semicolon	
+：	0	0.25	Colon	
+:	0	0.25	Colon	
+……	0	0.55	Ellipsis	
+…	0	0.55	Ellipsis	
+...	0	0.55	Ellipsis	
+——	0.08	0.25	Dash	
+—	0.08	0.25	Dash	
+《	0.08	0	TitleOpen	
+〈	0.08	0	TitleOpen	
+》	0	0.12	TitleClose	
+〉	0	0.12	TitleClose	
+“	0.05	0	QuoteOpen	
+‘	0.05	0	QuoteOpen	
+「	0.05	0	QuoteOpen	
+『	0.05	0	QuoteOpen	
+”	0	0.08	QuoteClose	
+’	0	0.08	QuoteClose	
+」	0	0.08	QuoteClose	
+』	0	0.08	QuoteClose	
+（	0.1	0	BracketOpen	
+(	0.1	0	BracketOpen	
+【	0.1	0	BracketOpen	
+〔	0.1	0	BracketOpen	
+［	0.1	0	BracketOpen	
+）	0	0.1	BracketClose	
+)	0	0.1	BracketClose	
+】	0	0.1	BracketClose	
+〕	0	0.1	BracketClose	
+］	0	0.1	BracketClose	
+·	0	0	None	
+•	0	0	None	
+～	0	0.15	Comma	不在数字之间时
+~	0	0.15	Comma	不在数字之间时
+<换行>	0	0.45	Newline	
+<段落>	0	0.8	Paragraph	
+<标题>	0	0.7	Title	
+<列表项>	0	0.35	ListItem	
+<切分>	0	0.04	InnerCut	长句中间切开处的衔接间隙
