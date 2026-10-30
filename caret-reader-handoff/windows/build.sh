@@ -1,16 +1,24 @@
 #!/usr/bin/env bash
-# 一键（v0.5）：编译 Windows 版 → 组装音色包 → 生成试听 sample.mp3（如缺）→ 组装标准版 / 轻量版 → 打 zip
+# 一键（v0.5，P0 起去掉了沙盒专用路径）：编译 Windows 版 → 组装音色包 → 生成试听 sample.mp3（如缺）→ 组装标准版 / 轻量版 → 打 zip
 # 用法：bash build.sh        （在 Linux 沙盒里运行）
 #   程序文件夹里的内部路径全部是英文：CaretReader.exe、voices\melo-0\model.onnx ……
 set -euo pipefail
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
-TTS="$(cd "$HERE/.." && pwd)"            # 模型所在目录 /workspace/work/tts
-export DOTNET_ROOT=/workspace/work/dotnet
-export PATH="$DOTNET_ROOT:$PATH"
+# P0：不再写死沙盒路径。可用环境变量覆盖：
+#   GBTTS_MODELS  模型源目录（默认 /workspace/work/tts，packs.py 也读它）
+#   GBTTS_OUT     发布输出目录（默认 <仓库>/caret-reader-handoff/release）
+#   DOTNET_ROOT   .NET SDK 目录（没设置且 PATH 里也没有 dotnet 时，才用旧的 /workspace/work/dotnet）
+#   GBTTS_VER     版本号（默认 v0.6）
+# Windows 本机请用 build.ps1。
+export GBTTS_MODELS="${GBTTS_MODELS:-/workspace/work/tts}"
+if ! command -v dotnet >/dev/null 2>&1; then
+  export DOTNET_ROOT="${DOTNET_ROOT:-/workspace/work/dotnet}"
+  export PATH="$DOTNET_ROOT:$PATH"
+fi
 export DOTNET_CLI_TELEMETRY_OPTOUT=1 DOTNET_NOLOGO=1
-VER=v0.5
-REL="$TTS/release/$VER"
+VER="${GBTTS_VER:-v0.6}"
+REL="${GBTTS_OUT:-$(cd "$HERE/.." && pwd)/release}/$VER"
 STAGE="$HERE/stage"
 PACKS="$HERE/pk/voices"                   # 全部音色包（模型文件是硬链接）
 SAMPLES="$HERE/config/samples"            # 预先做好的试听 mp3（统一试听文本，见 tests 里的 V04Tests.SampleText）
@@ -20,6 +28,9 @@ echo "== 1. 编译 Windows x64 版本 + 测试程序"
 rm -rf "$HERE/publish/win-x64"
 dotnet publish "$HERE/src/CaretReader.App" -c Release -r win-x64 -o "$HERE/publish/win-x64" -nologo -v q
 dotnet build "$HERE/tests/CaretReader.TestHarness" -c Release -nologo -v q
+echo "== 1a. 自动测试（xUnit + 命令行测试工具；有失败就停）"
+dotnet test "$HERE/tests/CaretReader.Tests" -c Release -nologo -v q
+for t in split paths nullguard packtest v06; do "$HARNESS" "$t" > /dev/null || { echo "测试 $t 失败"; exit 1; }; done
 
 echo "== 1b. v0.5 多音字前端数据（词库 A + jieba 词典 + 单字 / 词组读音；见 frontend/build_data.py）"
 python3 "$HERE/frontend/build_data.py"

@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
 """v0.4 音色包定义 + 组装。
-用法：python3 packs.py assemble <输出文件夹>    组装全部音色包（模型文件用硬链接，省沙盒空间）
+用法：python3 packs.py assemble <输出文件夹> [包id,包id]   组装全部（或指定的）音色包（模型文件用硬链接，省沙盒空间）
       python3 packs.py list                    打印包 id
 每个包 = 一个英文名文件夹：voice.json + 模型文件 (+ sample.mp3，由 build.sh 生成后放入)。
 """
 import json, os, shutil, sys
 
-TTS = '/workspace/work/tts'
+# P0：模型源目录可用环境变量 GBTTS_MODELS 指定（CI / Windows 本机），默认仍是原沙盒路径
+TTS = os.environ.get('GBTTS_MODELS', '/workspace/work/tts')
 FST4 = ['date.fst', 'phone.fst', 'number.fst', 'new_heteronym.fst']
 FST3 = ['date.fst', 'phone.fst', 'number.fst']
 
@@ -79,10 +80,16 @@ def pua_files(mk):
     return lex, pm
 
 
-def assemble(out):
+def assemble(out, only=None):
+    """only：只组装这些包 id（逗号分隔），CI 只下载了部分模型时用。"""
     os.makedirs(out, exist_ok=True)
     g = gains()
+    want = set(only.split(',')) if only else None
+    n = 0
     for vid, mk, sid, name, desc, order in VOICES:
+        if want is not None and vid not in want:
+            continue
+        n += 1
         m = MODELS[mk]
         d = os.path.join(out, vid)
         if os.path.exists(d):
@@ -113,11 +120,11 @@ def assemble(out):
                   modelBytes=os.path.getsize(os.path.join(d, m['model'])), files=fj)
         with open(os.path.join(d, 'voice.json'), 'w', encoding='utf-8') as fp:
             json.dump(vj, fp, ensure_ascii=False, indent=2)
-    print('assembled', len(VOICES), 'packs ->', out)
+    print('assembled', n, 'packs ->', out)
 
 
 if __name__ == '__main__':
     if sys.argv[1] == 'assemble':
-        assemble(sys.argv[2])
+        assemble(sys.argv[2], sys.argv[3] if len(sys.argv) > 3 else None)
     elif sys.argv[1] == 'list':
         print(' '.join(v[0] for v in VOICES))

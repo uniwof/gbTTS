@@ -1,0 +1,11 @@
+# .NET 编译产物
+bin/
+obj/
+TestResults/
+# 构建中间文件（build.sh / build.ps1）
+caret-reader-handoff/windows/publish/
+caret-reader-handoff/windows/stage/
+caret-reader-handoff/windows/pk/
+caret-reader-handoff/windows/models/
+caret-reader-handoff/release/
+__pycache__/
