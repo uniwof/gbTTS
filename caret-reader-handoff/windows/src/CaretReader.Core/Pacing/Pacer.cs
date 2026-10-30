@@ -157,14 +157,18 @@ public sealed class Pacer
         var cpm = CpmFor(voiceId);
         if (cpm == null) return legacySpeed;
         int target;
-        if (Store.TargetCpm is int t) target = t;
+        double ls = Math.Round(legacySpeed, 3);
+        // 目标已设过、且旧语速框没被改过 → 用目标；否则（第一次 / 用户改了旧语速框）由旧语速换算
+        if (Store.TargetCpm is int t && (Store.LegacySpeed is not double prev || Math.Abs(prev - ls) < 0.005)) target = t;
         else
         {
             target = PacingResolver.MigrateTarget(legacySpeed, cpm.Value);
+            Log.Write($"节奏：目标 {target} 字/分（由旧语速 {legacySpeed:0.00} 换算）");
             Store.TargetCpm = target;
+            Store.LegacySpeed = ls;
             Store.Save();
-            Log.Write($"节奏：首次启用统一语速，目标 {target} 字/分（由旧语速 {legacySpeed:0.00} 换算）");
         }
+        if (Store.LegacySpeed == null) { Store.LegacySpeed = ls; Store.Save(); }
         var o = Store.GetOverride(voiceId);
         return (float)PacingResolver.SpeedFor(target, cpm.Value, o.Speed);
     }

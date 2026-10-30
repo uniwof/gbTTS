@@ -49,6 +49,7 @@ public sealed class PacingStore
     private readonly Dictionary<string, VoiceOverride> _voices = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, CpmRecord> _bench = new(StringComparer.OrdinalIgnoreCase);
     private int? _targetCpm;
+    private double? _legacySpeed;
 
     public string? DataDir { get; }
     public string? PacingPath => DataDir == null ? null : Path.Combine(DataDir, "pacing.json");
@@ -78,6 +79,16 @@ public sealed class PacingStore
     {
         get { lock (_gate) return _targetCpm; }
         set { lock (_gate) _targetCpm = value is int v ? ClampTarget(v) : null; }
+    }
+
+    /// <summary>
+    /// 换算目标字/分时用的旧版“语速倍数”（设置窗口里原来的语速框）。
+    /// 在新的「语速：字/分」界面上线前，用户改了旧语速框 → 重新换算目标，旧框继续有效。
+    /// </summary>
+    public double? LegacySpeed
+    {
+        get { lock (_gate) return _legacySpeed; }
+        set { lock (_gate) _legacySpeed = value is double d && double.IsFinite(d) ? Math.Round(d, 3) : null; }
     }
 
     public static int ClampTarget(int v) => Math.Clamp((int)Math.Round(v / 10.0) * 10, MinTargetCpm, MaxTargetCpm);
@@ -121,7 +132,7 @@ public sealed class PacingStore
     {
         lock (_gate)
         {
-            _voices.Clear(); _bench.Clear(); _targetCpm = null;
+            _voices.Clear(); _bench.Clear(); _targetCpm = null; _legacySpeed = null;
             if (ReadObj(PacingPath) is JsonObject p)
             {
                 try
@@ -130,6 +141,12 @@ public sealed class PacingStore
                     if (t != null) _targetCpm = ClampTarget(t.GetValue<int>());
                 }
                 catch { Log.Write("pacing.json 的 targetCpm 无效，已忽略"); KeepBad(PacingPath); }
+                try
+                {
+                    var l = p["legacySpeed"];
+                    if (l != null) { double d = l.GetValue<double>(); if (double.IsFinite(d)) _legacySpeed = d; }
+                }
+                catch { }
                 if (p["voices"] is JsonObject vs)
                     foreach (var (id, node) in vs)
                     {
@@ -165,6 +182,7 @@ public sealed class PacingStore
         {
             var root = new JsonObject();
             if (_targetCpm is int t) root["targetCpm"] = t;
+            if (_legacySpeed is double ls) root["legacySpeed"] = ls;
             var vs = new JsonObject();
             foreach (var (id, o) in _voices.OrderBy(k => k.Key, StringComparer.Ordinal))
                 vs[id] = JsonSerializer.SerializeToNode(o, JsonOpts);
