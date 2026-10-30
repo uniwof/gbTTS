@@ -1,0 +1,116 @@
+IN : 圆周率是3.14。
+   [圆周率是3.14。] +0.5  -> engine: [圆周率是3.14。]  len=9
+IN : 共1,000元
+   [共1,000元] +0  -> engine: [共1,000元]  len=7
+IN : 10:30开会
+   [10:30开会] +0  -> engine: [10:30开会]  len=7
+IN : 10：30开会
+   [10：30开会] +0  -> engine: [10：30开会]  len=7
+IN : 版本v1.2.3发布
+   [版本v1.2.3发布] +0  -> engine: [版本v1.2.3发布]  len=10
+IN : 3．14
+   [3．14] +0  -> engine: [3．14]  len=4
+IN : １，０００元
+   [１，０００元] +0  -> engine: [１，０００元]  len=6
+IN : 数值.5很小
+   [数值.5很小] +0  -> engine: [数值.5很小]  len=6
+IN : -3.5度
+   [-3.5度] +0  -> engine: [-3.5度]  len=5
+IN : 他说……然后
+   [他说……] +0.5  -> engine: [他说……]  len=4
+   [然后] +0  -> engine: [然后]  len=2
+IN : 等等...
+   [等等...] +0.5  -> engine: [等等...]  len=5
+IN : ……开头
+   [开头] +0  -> engine: [开头]  len=2
+IN : 。。。
+IN : 他说：“你好。”然后走了。
+   [他说：] +0.25  -> engine: [他说，]  len=3
+   [“你好。”] +0.5  -> engine: [“你好。”]  len=5
+   [然后走了。] +0.5  -> engine: [然后走了。]  len=5
+IN : 「好！」
+   [「好！」] +0.5  -> engine: [「好！」]  len=4
+IN : （注：见上文。）
+   [（注：] +0.25  -> engine: [（注，]  len=3
+   [见上文。）] +0.5  -> engine: [见上文。）]  len=5
+IN : He said "hi." Then left.
+   [He said "hi."] +0.5  -> engine: [He said "hi."]  len=13
+   [Then left.] +0.5  -> engine: [Then left.]  len=10
+IN : 我用Mr. Smith的电脑
+   [我用Mr. Smith的电脑] +0  -> engine: [我用Mr. Smith的电脑]  len=14
+IN : e.g. 例如
+   [e.g. 例如] +0  -> engine: [e.g. 例如]  len=7
+IN : U.S.A.很大
+   [U.S.A.很大] +0  -> engine: [U.S.A.很大]  len=8
+IN : Dr.Wang来了
+   [Dr.Wang来了] +0  -> engine: [Dr.Wang来了]  len=9
+IN : OK!好的
+   [OK!] +0.5  -> engine: [OK!]  len=3
+   [好的] +0  -> engine: [好的]  len=2
+IN : 访问https://example.com/a.b?x=1,2吧
+   [访问https://example.com/a.b?x=1,2吧] +0  -> engine: [访问https://example.com/a.b?x=1,2吧]  len=32
+IN : 他——走了
+   [他——] +0.15  -> engine: [他——]  len=3
+   [走了] +0  -> engine: [走了]  len=2
+IN : 马克·吐温
+   [马克·吐温] +0  -> engine: [马克·吐温]  len=5
+IN : 1~3天
+   [1~3天] +0  -> engine: [1~3天]  len=4
+IN : 第一行\r\n\r\n第二行
+   [第一行] +0.5  -> engine: [第一行]  len=3
+   [第二行] +0  -> engine: [第二行]  len=3
+IN : ”开头的引号
+   [”开头的引号] +0  -> engine: [”开头的引号]  len=6
+IN : ，。！
+IN : 价格是3.
+   [价格是3.] +0.5  -> engine: [价格是3.]  len=5
+IN : 他说:"好"
+   [他说:] +0.25  -> engine: [他说,]  len=3
+   ["好"] +0  -> engine: ["好"]  len=3
+IN : 中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中ab文文文文文文文文文文文文文文文文文文文文
+   [中中中中中中中中中中中中中中中中中中中中] +0  -> engine: [中中中中中中中中中中中中中中中中中中中中]  len=20
+   [中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中] +0  -> engine: [中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中]  len=36
+   [中中中ab文文文文文文文文文文文文文文文文文文文文] +0  -> engine: [中中中ab文文文文文文文文文文文文文文文文文文文文]  len=25
+IN : 中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中😀文文文文文
+   [中中中中中中中中中中中中中中中中中中中中] +0  -> engine: [中中中中中中中中中中中中中中中中中中中中]  len=20
+   [中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中] +0  -> engine: [中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中]  len=36
+   [中中中😀文文文文文] +0  -> engine: [中中中😀文文文文文]  len=10
+IN : 中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中12345文文文文文
+   [中中中中中中中中中中中中中中中中中中中中] +0  -> engine: [中中中中中中中中中中中中中中中中中中中中]  len=20
+   [中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中] +0  -> engine: [中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中]  len=36
+   [中中中12345文文文文文] +0  -> engine: [中中中12345文文文文文]  len=13
+IN : This is a very long English sentence without any punctuation at all that goes on and on and on forever
+   [This is a very long] +0  -> engine: [This is a very long]  len=19
+   [English sentence without any] +0  -> engine: [English sentence without any]  len=28
+   [punctuation at all that goes on and] +0  -> engine: [punctuation at all that goes on and]  len=35
+   [on and on forever] +0  -> engine: [on and on forever]  len=17
+IN : 校验值a4c123b1612dd272d1371c17149d439536b3216fdaeeb975729fae923d5a4fd12aabfe228f219e9cb0eb53f16947ccf25ec84d8dbc74254770f58904dba41ecccc3fc1626e53a13043b026c48bbf33feff9243a8f506b40928b5b7a767c76fb008f86bebb2737f6a6f0fb23c6f5da2cec255404e4fb440034d6608697a8d41bed440e50454f31af3176813e02ea68ef786e4d3cea27d26934b484e73cf575dcad6ba2b0aee0ca923732881584d8c4fa2815d2802827283e0ad84173581569969e58b081006f7e3dfc967a64cb14028d512c9791e558e08baa7196b50ac2f86702824c1c099724caf4941d4072014b3ce107f80e222f828767efc2f91624a8940f1f836f99eee3692f09e2e8c662248b483b7ffc050fec94dbca3a0aac36098b2cc2bd818319478da6bd0c621de49f145fda9988c79fc35526f7eaed46725a2a7b860dcd6c8a1f8b46287cced9041dff02cee737443e210471948d33296c87009e8a7f770d9106fd287db7f1adbc60926f6967e7893f57fd14c1604d115cea325a65e19cbae530282bd36cb9d21f6be6abf0d7c1c1e21862ab8a18a8902073fec8df4f50947aaeb26c57d21fa5d328263dfe574de739988b886e7577496a2c8773e130f7eb19731662b5e803b61ba4168160adb59261ff2d3c425c8d99d19bdd0b6cc60d5d32cbe54014c2b54b95523cf6941fa1c257c6f561c5cb347611a3ce9d97dcbee500fe7ee5fc324bdb2e1142a21c402364f9572b85a8e48f687ab165c58ac5831be38cb8cb4ba2e751989a01749ddb14f71010b93b7d946bf54074e3248c801bef750110c57513064d6d59291f0cde2e5738713a818d8962058765a6ca7cff00d796c25410335b400141212b62c376631129f34369aad80b891baf90d0d3bf16295d06910bf3f5fb85967f532f3ab3cc2d0b698d5c7e41ba4ea5ee874ae7689447ab57a683536c4499d863386ce10cd79e048c07dd7753eda83d7c58dfe0d5a0cf318656b3e6f0bade65c3b188cc102ddb8379c7ce65426f74bde94fb78c8d5f08b79affd2b49c12a4b0062983475eb46c5296f62e338d74ff1fe4f7f505aef9ebdd25b001a3ff416d4a3baf69dad8199bfca8b6f3a6a9421cc1c93016f1c4261e5351d30b49895d1a0d1f13dce20c4fd32f640d0032634f087e51b429fe8110102c995f1abef543b5dfce8a981a049d7ccc7e90a88d519448fb2fc6791ce680ce2b27c8af6666259bbc471fb3be24a0b80316f688d3e481a65c2011bef2c328a72c5e5b77518b1018f134a069e3fab8c3bfc5e740e61572b4e3c02eaa7f3b4a715e4e48dd74089a58f3aef3416f9386bd8773c9d51940ea4e095bd1d6854575622f856469602d1ba9f20df4875b15b0be23b7ac193fe04072755398003680e7e3b35183ef8333c4774ec50cd1c1bac7adac1a4b7d0b352ad6074dce1118813830d71939b53182e4e349d98729e7c6be9ff907a76cc0b57aaf89691052be1ceb374dab4683f84d30d3fc4d83cee9b9bcca0fce9594dc72aa7a6d0018f99ddceb1be0273dbc46dfcea25bab29539ad5966d513b1d00909c30065f846d34530325fed10a47b851832b6ec017c1e1777155a0e9d8f27c7d9cf07255bc509cb3acac23db7c6e9b7d180a4742684ee75bb6cc69f67e48eb7c64328c0490c257a632b96292794c9bce4850bbd0e7cb3593871c15d694c1957f8db03911731a6b2dc782bdeae16d4f6185578715bbd26944ff770e4b9447a3d54ec6390bf61189639e35aeeb95210ef2a83fdf6a0b29872400c49b5539ac5ba7b4b87113c16fdf5924754ec21ef66b01d4921da2e055c90eb6f2aed4c21a9dbf49a067e24bdb7ec83756378368f7e732d2e433ec56f24b1c71b106e934d263b5ba0837bbf1b3ba3178b6e0e30f328549c488e00a4ff1125cf5ec72ba694165beaecba0afa707e1448c828b4136d3b97429ab7bca1aafb77b4460ecec9524998a26259bebd2fa5880587061ce6936714122a40680a06aa0fca51d12afc8e00aa1da5204642bbdb4a78f19e8b8480f3b47c20431658b4550b7ef6bce6a0302cb17cdc70808d77b6ad89f65f84992a0f75ae616b1e5d490340494b35ec2daca1760147d301a233f4d05743bf2b672850882161db80a1e9ad8cdadc4ccd4078c763211caeae0ffac7cb2c8a2788fbf742b65b754e51acbd3d48c3bb9e28c9e3ef5404bf7bac806081598a878e2f264d9b1ecb19dd8b7c46b26a22eccdf03eeddf52ecf4076c19ace327203f26e16af1d4d14aa605882ac89cd1997cd896416bef4ba6e1a02da187e966ece6615d3142f505f7965463e3621d78ed41415e97a498a647c1ac49726e45dac31b3629fb0f26f89264f879130b64915abef7ab5392e335ce1113d4db2b5b52a0f94833734f83ae7518b69c64773031f6725480dc3932677172a31659a2e50add127454b4667a20f1fa2261bd2b5ff4891e5dc9328776e7f1ccacc27ad909f03fdd9e4a62bce19a285ed7361c5c8a4b57bc9fa65c00537e8b3c48d2ae89b9c1ffb013ce94e1af408461c58790dd2cfb8a5f1b461595919cb589f6aec38bcacf836ed5a148fd28cbc938e019bb8723d39553ccaccfab54d946a2d207dc684477391c94c8286793b2b023a60e4e81e11e3f79aa766907508db2823ccd71ba82f4dee6a63c59620e66869002b6d08b5ab9315bd0e3a34bff2aaf438c6b8068dc5d44036c002e162aaef6076bc3346eee21f5c7ff43fc2770c7173601e1c771d814e0f33545a3c0202219ec0605e636d32b32732b89994fa6022136ced620104d159e8489b0ac35e5fa870d0a7ba07a25，请核对。
+   [校验值一串字符，] +0.15  -> engine: [校验值一串字符，]  len=8
+   [请核对。] +0.5  -> engine: [请核对。]  len=4
+IN : 请访问https://example.com/path/abcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghi。谢谢
+   [请访问链接。] +0.5  -> engine: [请访问链接。]  len=6
+   [谢谢] +0  -> engine: [谢谢]  len=2
+IN : Supercalifragilistic-expialidocious-and-other-very-long-hyphenated-words-hyphens-forever then more
+   [Supercalifragilistic] +0  -> engine: [Supercalifragilistic]  len=20
+   [-expialidocious-and-other-very-long-] +0  -> engine: [-expialidocious-and-other-very-long-]  len=36
+   [hyphenated-words-hyphens-forever] +0  -> engine: [hyphenated-words-hyphens-forever]  len=32
+   [then more] +0  -> engine: [then more]  len=9
+IN : 订单号 A1B2C3D4E5F6G7H8 已发货
+   [订单号 一串字符 已发货] +0  -> engine: [订单号 一串字符 已发货]  len=12
+IN : 卡号6222020200112233445。
+   [卡号一串数字。] +0.5  -> engine: [卡号一串数字。]  len=7
+IN : 数据 aGVsbG8gd29ybGQgdGhpcyBpcyBiYXNlNjQ0= 结束
+   [数据 一串字符= 结束] +0  -> engine: [数据 一串字符= 结束]  len=11
+IN : 短网址 https://a.com/x 和 www.example.org/abc 保留
+   [短网址 https://a.com/x] +0  -> engine: [短网址 https://a.com/x]  len=19
+   [和 www.example.org/abc 保留] +0  -> engine: [和 www.example.org/abc 保留]  len=24
+IN : git commit 3f9a2c1d4e5b6a7980c1d2e3f4a5b6c7d8e9f0a1 修复问题
+   [git commit 一串字符 修复问题] +0  -> engine: [git commit 一串字符 修复问题]  len=20
+IN : a============================================================================================================================================================================================================================================================================================================b
+   [a===================] +0  -> engine: [a===================]  len=20
+   [=============================b] +0  -> engine: [=============================b]  len=30
+IN : 😀中😀中😀中😀中😀中😀中😀中😀中😀中😀中😀中😀中😀中😀中😀中😀中😀中😀中😀中😀中😀中😀中😀中😀中😀中😀中😀中😀中😀中😀中😀中😀中😀中😀中😀中😀中😀中😀中😀中😀中
+   [😀中😀中😀中😀中😀中😀中😀] +0  -> engine: [😀中😀中😀中😀中😀中😀中😀]  len=20
+   [中😀中😀中😀中😀中😀中😀中😀中😀中😀中😀中😀中😀] +0  -> engine: [中😀中😀中😀中😀中😀中😀中😀中😀中😀中😀中😀中😀]  len=36
+   [中😀中😀中😀中😀中😀中😀中😀中😀中😀中😀中😀中😀] +0  -> engine: [中😀中😀中😀中😀中😀中😀中😀中😀中😀中😀中😀中😀]  len=36
+   [中😀中😀中😀中😀中😀中😀中😀中😀中😀中] +0  -> engine: [中😀中😀中😀中😀中😀中😀中😀中😀中😀中]  len=28

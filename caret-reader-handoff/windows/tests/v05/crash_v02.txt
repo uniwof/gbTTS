@@ -1,0 +1,3 @@
+v0.2 做法：new OfflineTts(坏配置) → tts.SampleRate …
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/offline-tts-vits-model-config.cc:Validate:38 --vits-model: '/nonexistent/光标朗读/model.onnx' does not exist
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/c-api/c-api.cc:SherpaOnnxCreateOfflineTts:1624 Errors in config

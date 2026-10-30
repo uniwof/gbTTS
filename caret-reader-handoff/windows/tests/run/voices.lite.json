@@ -1,0 +1,16 @@
+{
+  // 光标朗读 · 轻量版 音色清单（一个音色，最省内存、最快）
+  "edition": "轻量版",
+  "models": [
+    {
+      "id": "matcha", "type": "matcha", "dir": "models/matcha-icefall-zh-baker",
+      "model": "model-steps-3.onnx", "vocoder": "vocos-22khz-univ.onnx",
+      "tokens": "tokens.txt", "lexicon": "lexicon.txt", "dictDir": "dict",
+      "ruleFsts": ["date.fst", "phone.fst", "number.fst"],
+      "approxLoadSeconds": 2
+    }
+  ],
+  "voices": [
+    { "id": "matcha-0", "name": "女声 · 标准 (Matcha)", "model": "matcha", "sid": 0 }
+  ]
+}

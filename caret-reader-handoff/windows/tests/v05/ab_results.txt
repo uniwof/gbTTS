@@ -1,0 +1,13 @@
+r1 matcha-0 v04 load=2.35s RTF=0.297 first=0.99s gaps='卡顿) 0 次 / 共 0.00s' peakMB=266 loadavg=5.85
+r1 matcha-0 v05 load=2.86s RTF=0.297 first=0.84s gaps='卡顿) 0 次 / 共 0.00s' peakMB=363 loadavg=6.57
+r1 chaowen-0 v04 load=3.16s RTF=0.294 first=1.03s gaps='卡顿) 0 次 / 共 0.00s' peakMB=223 loadavg=6.57
+r1 chaowen-0 v04 load=1.21s RTF=0.189 first=0.13s gaps='卡顿) 0 次 / 共 0.00s' peakMB=221 loadavg=2.91
+r1 melo-0 v04 load=5.52s RTF=0.640 first=1.02s gaps='卡顿) 0 次 / 共 0.00s' peakMB=362 loadavg=3.00
+r1 chaowen-0 v05 load=1.67s RTF=0.229 first=0.26s gaps='卡顿) 0 次 / 共 0.00s' peakMB=330 loadavg=2.72
+r1 melo-0 v05 load=3.22s RTF=0.652 first=1.01s gaps='卡顿) 0 次 / 共 0.00s' peakMB=493 loadavg=2.67
+r2 chaowen-0 v04 load=1.07s RTF=0.147 first=0.17s gaps='卡顿) 0 次 / 共 0.00s' peakMB=216 loadavg=4.89
+r2 chaowen-0 v05 load=2.16s RTF=0.243 first=0.90s gaps='卡顿) 0 次 / 共 0.00s' peakMB=331 loadavg=5.18
+r2 matcha-0 v04 load=5.32s RTF=0.267 first=0.95s gaps='卡顿) 0 次 / 共 0.00s' peakMB=272 loadavg=5.19
+r3w chaowen-0 v04 load=1.13s RTF=0.175 first=0.25s gaps='卡顿) 0 次 / 共 0.00s' peakMB=221 loadavg=4.96
+r3w chaowen-0 v05 load=1.96s RTF=0.230 first=0.97s gaps='卡顿) 0 次 / 共 0.00s' peakMB=325 loadavg=4.40
+r4w chaowen-0 v04 load=1.79s RTF=0.230 first=0.97s gaps='卡顿) 0 次 / 共 0.00s' peakMB=221 loadavg=4.46
