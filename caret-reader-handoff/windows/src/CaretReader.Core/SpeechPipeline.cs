@@ -1,3 +1,4 @@
+using CaretReader.Core.Pacing;
 using System.Diagnostics;
 
 namespace CaretReader.Core;
@@ -203,6 +204,18 @@ public static class SpeechPipeline
         double startupBudget = Math.Max(MinStartupWaitSeconds, MaxStartupWaitSeconds - offset);
         Timer? startTimer = null;
         int sr = engine.SampleRate;
+        // 第 2 轮：节奏（去首尾静音、“字/分”统一语速、本音色停顿倍率）。Pacer.Enabled=false 时完全按旧版。
+        var pacer = Pacer.Enabled ? Pacer.Current : null;
+        string? voiceId = engine.LoadedPackId;
+        speed = pacer?.ResolveSpeed(voiceId, speed) ?? speed;
+        var trim = pacer?.TrimFor(voiceId);
+        if (trim != null && !trim.Enabled) trim = null;
+        double pauseScale = pacer?.PauseScale(voiceId) ?? 1.0;
+        float[] Speak(string t)
+        {
+            var raw = engine.Synthesize(TextSplitter.TextForEngine(t), sid, speed);
+            return trim == null ? raw : SilenceTrimmer.Trim(raw, sr, trim);
+        }
         // 一按“停止”就立刻让声音停下来（不必等当前这句合成完）
         using var stopNow = token.Register(() => { try { sink.Stop(); } catch { } });
         try
@@ -235,23 +248,27 @@ public static class SpeechPipeline
                 var t0 = clock.Elapsed;
                 float[] speech;
                 if (clause.Text.Length <= TextSplitter.HardMaxClauseChars)
-                    speech = engine.Synthesize(TextSplitter.TextForEngine(clause.Text), sid, speed);
+                    speech = Speak(clause.Text);
                 else
                 {
                     var parts = new List<float[]>();
+                    // 长句中间（没有标点）切开处：去静音后固定补 0.04 秒（InnerCut，不乘倍率）
+                    var gap = trim == null ? Array.Empty<float>() : new float[(int)Math.Round(trim.InnerCutSeconds * sr)];
                     foreach (var part in Guard(clause.Text))
                     {
                         if (token.IsCancellationRequested) break;
-                        parts.Add(engine.Synthesize(TextSplitter.TextForEngine(part), sid, speed));
+                        if (parts.Count > 0 && gap.Length > 0) parts.Add(gap);
+                        parts.Add(Speak(part));
                     }
                     speech = parts.SelectMany(x => x).ToArray();
                 }
+                pacer?.Observe(voiceId, clause.Text, trim == null ? 0 : speech.Length, sr, speed);
                 stats.SynthSeconds += (clock.Elapsed - t0).TotalSeconds;
                 if (token.IsCancellationRequested) break; // 合成期间被停止 → 丢弃这一句
                 ApplyGain(speech, gain);
 
                 // 语音 + 后面的停顿静音，拼成一段
-                int silence = (int)Math.Round(clause.PauseAfterSeconds * sr);
+                int silence = (int)Math.Round(Math.Clamp(clause.PauseAfterSeconds * pauseScale, 0, 3.0) * sr);
                 var chunk = new float[speech.Length + silence];
                 Array.Copy(speech, chunk, speech.Length);
 

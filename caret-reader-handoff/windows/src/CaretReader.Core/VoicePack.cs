@@ -63,6 +63,11 @@ public sealed class VoicePack
     /// <summary>主模型文件的字节数（可省略）。填了就核对：大小不对 = 没下载 / 解压完整，拒绝加载（不完整的模型可能让原生库直接崩溃）。</summary>
     public long ModelBytes { get; set; }
 
+    /// <summary>第 2 轮：voice.json 里可选的 "pacing"（cpmAtSpeed1 / trimDb / defaultPauseScale）。
+    /// 用 JsonElement 接收：写错了只忽略这一项，不影响音色包加载。</summary>
+    [JsonPropertyName("pacing")] public JsonElement? PacingRaw { get; set; }
+    [JsonIgnore] public global::CaretReader.Core.Pacing.VoicePacing? Pacing { get; private set; }
+
     // ---------- 运行时信息 ----------
     /// <summary>音色包文件夹的完整路径。</summary>
     [JsonIgnore] public string Dir { get; private set; } = "";
@@ -164,6 +169,9 @@ public sealed class VoicePack
             p.SamplePath = s != null && File.Exists(s) ? s : null;
             string? ic = string.IsNullOrWhiteSpace(p.Icon) ? null : p.Inside(p.Icon);
             p.IconPath = ic != null && File.Exists(ic) ? ic : null;
+            p.Pacing = ReadPacing(p.PacingRaw, p.Warnings);
+            if (p.Pacing != null) global::CaretReader.Core.Pacing.Pacer.PackPacing[p.Id] = p.Pacing;
+            else global::CaretReader.Core.Pacing.Pacer.PackPacing.TryRemove(p.Id, out _);
             return p;
         }
         catch (Exception ex)
@@ -171,6 +179,23 @@ public sealed class VoicePack
             error = "读取失败：" + ex.Message;
             return null;
         }
+    }
+
+    private static global::CaretReader.Core.Pacing.VoicePacing? ReadPacing(JsonElement? raw, List<string> warnings)
+    {
+        if (raw is not JsonElement e || e.ValueKind != JsonValueKind.Object) return null;
+        var v = new global::CaretReader.Core.Pacing.VoicePacing();
+        bool any = false;
+        if (e.TryGetProperty("cpmAtSpeed1", out var c) && c.ValueKind == JsonValueKind.Number && c.TryGetDouble(out var cpm))
+        {
+            if (cpm >= 60 && cpm <= 900) { v.CpmAtSpeed1 = cpm; any = true; }
+            else warnings.Add("voice.json 的 pacing.cpmAtSpeed1 不合理，已忽略（改为本机测）");
+        }
+        if (e.TryGetProperty("trimDb", out var t) && t.ValueKind == JsonValueKind.Number && t.TryGetDouble(out var db) && db < -5 && db > -80)
+        { v.TrimDb = db; any = true; }
+        if (e.TryGetProperty("defaultPauseScale", out var ps) && ps.ValueKind == JsonValueKind.Number && ps.TryGetDouble(out var sc) && sc >= 0.5 && sc <= 2)
+        { v.DefaultPauseScale = sc; any = true; }
+        return any ? v : null;
     }
 
     /// <summary>音色包里的相对路径 → 完整路径；指到包外面时返回 null。</summary>
