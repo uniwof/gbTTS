@@ -90,6 +90,15 @@ internal sealed class MainForm : Form
     {
         _settingsPath = AppSettings.ResolvePath(_appDir);
         _settings = AppSettings.Load(_settingsPath);
+        // P1：旧版的五档停顿、旧用户词库迁移到新的用户标点表 / 用户读法词库（只做一次，不覆盖）
+        try
+        {
+            CaretReader.Core.Settings.SettingsMigration.Run(
+                CaretReader.Core.Settings.TextLayerSettings.UserDataDir(_settingsPath), _settings.Pauses,
+                Path.Combine(_appDir, PolyphoneFrontend.UserDictFileName),
+                CaretReader.Core.Text.PunctuationTable.Load(Path.Combine(CaretReader.Core.Text.TextLayer.RulesDir(_appDir), "punctuation.tsv"), null));
+        }
+        catch (Exception ex) { Log.Write("设置迁移失败: " + ex.GetType().Name); }
 
         Text = "光标朗读";
         FormBorderStyle = FormBorderStyle.None;
@@ -805,9 +814,10 @@ internal sealed class MainForm : Form
         Log.Write($"取文字方式: {grab.Method}{(grab.Selection ? "（选中的文字）" : "")}，长度 {grab.Text?.Length ?? 0}{(grab.Rest != null ? "（其余后台读取）" : "")}，" +
                   $"用时 {grabSeconds:0.00}s，目标 {target}，{grab.Detail}");
 
-        var pauses = _settings.Pauses;
+        // P1：新文本层（读法规则、数字、字母、Markdown、标点表停顿、标题识别）
+        var layer = CaretReader.Core.Text.TextLayer.For(_appDir, _settingsPath, _settings.Text);
         string? text = grab.Text;
-        var first = await Task.Run(() => TextSplitter.Split(text, pauses, firstChunk: true, CaretTextGrabber.MaxChars));
+        var first = await Task.Run(() => layer.Split(text, firstChunk: true, CaretTextGrabber.MaxChars));
         if (session != _readSession || cts.IsCancellationRequested) return;
         if (first.Count == 0 && grab.Rest == null)
         {
@@ -845,7 +855,7 @@ internal sealed class MainForm : Form
             }, TaskScheduler.Default);
         _readTask = task;
 
-        if (grab.Rest != null) _ = FetchRestAsync(grab.Rest, queue, pauses, cts.Token);
+        if (grab.Rest != null) _ = FetchRestAsync(grab.Rest, queue, layer, cts.Token);
 
         PipelineStats? stats = null;
         try { stats = await task; }
@@ -862,13 +872,13 @@ internal sealed class MainForm : Form
         if (session == _readSession && stats?.Error != null) FlashStatus("朗读出错：" + stats.Error, 6000);
     }
 
-    private static async Task FetchRestAsync(Func<string?> rest, ClauseQueue queue, PauseSettings pauses, CancellationToken token)
+    private static async Task FetchRestAsync(Func<string?> rest, ClauseQueue queue, CaretReader.Core.Text.TextLayer layer, CancellationToken token)
     {
         try
         {
             string? more = await Task.Run(rest);
             if (token.IsCancellationRequested || string.IsNullOrEmpty(more)) return;
-            var clauses = await Task.Run(() => TextSplitter.Split(more, pauses, firstChunk: false, CaretTextGrabber.MaxChars));
+            var clauses = await Task.Run(() => layer.Split(more, firstChunk: false, CaretTextGrabber.MaxChars));
             queue.Add(clauses);
             Log.Write($"后台读取剩余文字: {more.Length} 字，{clauses.Count} 句");
         }
