@@ -4,10 +4,10 @@
 光标朗读 第 2 轮：把朋友导出的 Piper/VITS onnx 文件夹转换成朗读器能直接加载的音色包。
 
 用法（一句话）：
-    python onnx2voicepack.py <朋友的模型文件夹> <输出文件夹> [--name 显示名] [--id 英文id]
+    python convert_piper.py <朋友的模型文件夹> <输出文件夹> [--name 显示名] [--id 英文id] [--check] [--no-audition]
 
 输入文件夹：一个 .onnx 文件 + 同名 .onnx.json（Piper 导出时自带的配置）。
-输出：<输出文件夹>/<id>/ 里有 voice.json、model.onnx（已写入 sherpa-onnx 需要的元数据）、tokens.txt、
+输出：<输出文件夹>/<id>/ 里有 voice.json（含 cpm 和 license.commercialOk）、sample.wav 试听（装了 sherpa-onnx 才有）、model.onnx（已写入 sherpa-onnx 需要的元数据）、tokens.txt、
       lexicon.txt（+ pua_map.txt 多音字前端），把这个文件夹放进朗读器的 voices\\ 里即可。
 
 依赖：onnx、numpy（Apache-2.0 / BSD）；中文词典用 pypinyin（MIT）生成。
@@ -203,10 +203,93 @@ def ascii_id(s):
     return s[:40] or 'my-voice'
 
 
-def convert(src, dst_root, name=None, vid=None):
+# ---------------------------------------------------------------- 试听 + 测 cpm
+
+AUDITION_TEXT = '你好，这是我的声音。今天天气很好，我们一起出去走走吧。'
+FALLBACK_CLAUSES = ['清晨的阳光照进小院', '奶奶坐在门口择菜', '一边哼着年轻时学会的老歌', '院子里的桂花开得正好',
+                    '风一吹，香气就飘满了整条小巷', '隔壁的孩子背着书包跑过', '回头冲奶奶喊了一声早上好']
+
+
+def fixed_clauses():
+    """与 C# PaceCalibrator.FixedClauses 同一段固定文本（读源码；找不到就用精简版，cpm 略有偏差，朗读器会按实际朗读校正）。"""
+    p = os.path.join(os.path.dirname(HERE), 'src', 'CaretReader.Core', 'Pacing', 'Pacer.cs')
+    try:
+        txt = open(p, encoding='utf-8').read()
+        blk = txt.split('FixedClauses =', 1)[1].split('};', 1)[0]
+        cl = re.findall(r'"([^"]+)"', blk)
+        if len(cl) >= 10:
+            return cl
+    except Exception:
+        pass
+    return FALLBACK_CLAUSES
+
+
+def trim_silence(samples, sr):
+    """与 C# SilenceTrimmer 同一规则：10ms 帧、阈值 max(-50dB, 峰值-35dB)，开头留 20ms、结尾留 50ms。"""
+    import numpy as np
+    x = np.asarray(samples, dtype=np.float32)
+    frame = max(1, int(sr * 0.010))
+    n = len(x) // frame
+    if n == 0 or not x.size:
+        return x
+    peak = float(np.max(np.abs(x)))
+    if peak <= 1e-6:
+        return x
+    db = lambda v: 20 * np.log10(max(v, 1e-9))
+    thr = max(-50.0, db(peak) - 35.0)
+    rms = np.sqrt(np.mean(x[:n * frame].reshape(n, frame) ** 2, axis=1))
+    loud = [i for i in range(n) if db(float(rms[i])) > thr]
+    if not loud:
+        return x
+    a = max(0, loud[0] * frame - int(sr * 0.020))
+    b = min(len(x), (loud[-1] + 1) * frame + int(sr * 0.050))
+    return x[a:b]
+
+
+def audition(pack_dir, files, ns):
+    """用 sherpa-onnx（可选依赖，Apache-2.0）合成试听 WAV，并测 speed=1 的字/分。没装就跳过，返回 (None, False)。"""
+    try:
+        import sherpa_onnx
+        import numpy as np
+        import wave
+    except ImportError:
+        say('（没装 sherpa-onnx，跳过试听 WAV 和语速测量；朗读器首次朗读时会自己测。需要的话：pip install sherpa-onnx==1.13.8）')
+        return None, False
+    cwd = os.getcwd()
+    try:
+        os.chdir(pack_dir)    # 相对路径，避开中文路径问题
+        vits = sherpa_onnx.OfflineTtsVitsModelConfig(
+            model=files['model'], tokens=files['tokens'], lexicon=files.get('lexicon', ''))
+        cfg = sherpa_onnx.OfflineTtsConfig(
+            model=sherpa_onnx.OfflineTtsModelConfig(vits=vits, num_threads=2, provider='cpu'), max_num_sentences=1)
+        tts = sherpa_onnx.OfflineTts(cfg)
+        chars = 0
+        secs = 0.0
+        for c in fixed_clauses():
+            a = tts.generate(c, sid=0, speed=1.0)
+            secs += len(trim_silence(a.samples, a.sample_rate)) / a.sample_rate
+            chars += len(re.findall(r'[\u4e00-\u9fff]', c))
+        cpm = round(chars / secs * 60, 1) if secs > 0 else None
+        a = tts.generate(AUDITION_TEXT, sid=0, speed=1.0)
+        pcm = (np.clip(np.asarray(a.samples, dtype=np.float32), -1, 1) * 32767).astype('<i2')
+        with wave.open(os.path.join(pack_dir, 'sample.wav'), 'wb') as w:
+            w.setnchannels(1); w.setsampwidth(2); w.setframerate(a.sample_rate); w.writeframes(pcm.tobytes())
+        say(f'  试听 WAV 已生成；速度 1.0 时约 {cpm} 字/分')
+        return cpm, True
+    except Exception as e:
+        say(f'  （试听/测速失败，已跳过：{type(e).__name__}: {e}）')
+        return None, False
+    finally:
+        os.chdir(cwd)
+
+
+def convert(src, dst_root, name=None, vid=None, check_only=False, audition_on=True):
     model, cfg = find_model(src)
     kind, info = inspect(model, cfg)
     say(f'识别结果：{ {"piper-pinyin": "Piper 拼音版（推荐）", "sherpa-ready": "已经是 sherpa-onnx 格式"}[kind] }')
+    if check_only:
+        say('体检通过，可以转换（去掉 --check 即开始转换）。')
+        return None
     base = os.path.basename(os.path.splitext(model)[0])
     vid = ascii_id(vid or base)
     out = os.path.join(dst_root, vid)
@@ -233,12 +316,18 @@ def convert(src, dst_root, name=None, vid=None):
         files['ruleFsts'] = []
         vj = {
             'formatVersion': 1, 'id': vid, 'name': (name or base)[:40], 'engine': 'piper' if kind == 'piper-pinyin' else 'vits',
-            'sid': 0, 'gain': 1.0, 'speed': 1.0, 'description': '由 onnx2voicepack.py 转换', 'order': 50,
+            'sid': 0, 'gain': 1.0, 'speed': 1.0, 'description': '由 convert_piper.py 转换', 'order': 50,
             'approxLoadSeconds': 2, 'modelBytes': os.path.getsize(os.path.join(work, 'model.onnx')),
             'files': files,
             'caps': {'speakers': ns, 'sampleRate': sr},
             'license': {'commercialOk': False, 'note': '朋友自训模型，许可请向作者确认'},
         }
+        cpm, has_wav = audition(work, files, ns) if audition_on else (None, False)
+        if has_wav:
+            vj['sample'] = 'sample.wav'
+        if cpm:
+            vj['cpm'] = cpm
+            vj['pacing'] = {'cpmAtSpeed1': cpm}
         with open(os.path.join(work, 'voice.json'), 'w', encoding='utf-8') as f:
             json.dump(vj, f, ensure_ascii=False, indent=2)
         if os.path.exists(out):
@@ -255,13 +344,16 @@ def convert(src, dst_root, name=None, vid=None):
 def main(argv=None):
     ap = argparse.ArgumentParser(description='把 Piper/VITS onnx 文件夹转换成光标朗读的音色包')
     ap.add_argument('src', help='朋友的模型文件夹（.onnx + .onnx.json）')
-    ap.add_argument('dst', help='输出文件夹（会在里面建 <id> 子文件夹）')
+    ap.add_argument('dst', nargs='?', default='.', help='输出文件夹（会在里面建 <id> 子文件夹）')
     ap.add_argument('--name', help='显示名，例如 “小明的声音”')
     ap.add_argument('--id', help='英文 id（文件夹名），默认用模型文件名')
+    ap.add_argument('--check', action='store_true', help='只体检，不转换')
+    ap.add_argument('--no-audition', action='store_true', help='不生成试听 WAV、不测语速（没装 sherpa-onnx 时自动跳过）')
     a = ap.parse_args(argv)
     try:
-        os.makedirs(a.dst, exist_ok=True)
-        convert(a.src, a.dst, a.name, a.id)
+        if not a.check:
+            os.makedirs(a.dst, exist_ok=True)
+        convert(a.src, a.dst, a.name, a.id, a.check, not a.no_audition)
         return 0
     except Refuse as e:
         say('无法转换：' + str(e))
