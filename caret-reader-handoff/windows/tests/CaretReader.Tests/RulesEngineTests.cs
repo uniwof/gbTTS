@@ -8,7 +8,7 @@ public class RulesEngineTests
 {
     private static RulesEngine Slang() => new(new[]
     {
-        RuleFile.Parse(RulesTestData.Read("slang.tsv"), "slang.tsv", RuleFile.PrioritySlang),
+        RuleFile.Parse("替换\tYYDS\t永远的神\t整词,不分大小写\n替换\tnb\t牛掰\t整词,不分大小写\n替换\temo\t一莫\t整词,不分大小写\n", "user.tsv", RuleFile.PriorityUser),
         RuleFile.Parse(RulesTestData.Read("templates.tsv"), "templates.tsv", RuleFile.PriorityBuiltin),
     });
 

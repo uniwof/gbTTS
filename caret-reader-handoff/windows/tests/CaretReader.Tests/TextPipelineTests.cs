@@ -28,7 +28,7 @@ public class TextPipelineTests
     [InlineData("他把GDP、PPT和MP3都讲清楚了，A计划比B计划好。",
         "他把[ji4 di4 pi1]、[pi1 pi1 ti4]和[ai2 mu1 pi1]三都讲清楚了，[ei1]计划比[bi4]计划好。")]
     [InlineData("## 第三章 结论", "第三章 结论")]
-    public void Golden_sentences(string src, string expected) => Assert.Equal(expected, Run(P(), src));
+    public void Golden_sentences(string src, string expected) => Assert.Equal(expected, Run(P("替换\tYYDS\t永远的神\t整词\n"), src));
 
     [Fact]
     public void Golden_polyphone_sentence_with_user_rules()
@@ -53,14 +53,6 @@ public class TextPipelineTests
         Assert.Equal(PauseKind.Title, r.LineKinds![0]);
         var off = P(o: new TextPipelineOptions { MarkdownClean = false });
         Assert.StartsWith("#", Run(off, "# 标题"));
-    }
-
-    [Fact]
-    public void Slang_pack_can_be_turned_off()
-    {
-        var o = new TextPipelineOptions { VoiceSpeaksEnglish = true };
-        o.RulePacks["slang.tsv"] = false;
-        Assert.Equal("[wai4 wai4 di4 ai2 si1]", Run(P(o: o), "YYDS"));
     }
 
     [Fact]

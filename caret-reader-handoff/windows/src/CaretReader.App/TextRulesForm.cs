@@ -113,7 +113,6 @@ internal sealed class TextRulesForm : Form
         var side = new FlowLayoutPanel { Dock = DockStyle.Right, Width = S(240), FlowDirection = FlowDirection.TopDown, WrapContents = false, Padding = new Padding(S(8), 0, 0, 0) };
         side.Controls.Add(new Label { Text = "内置规则包", AutoSize = true, Font = new Font(Font, FontStyle.Bold) });
         _packs.Width = S(220); _packs.Height = S(70); _packs.CheckOnClick = true; _packs.BorderStyle = BorderStyle.None; _packs.BackColor = Ink.Paper;
-        _packs.Items.Add("网络用语（slang.tsv）", Settings.PackEnabled("slang.tsv"));
         _packs.Items.Add("书名号示例（templates.tsv）", Settings.PackEnabled("templates.tsv"));
         side.Controls.Add(_packs);
         side.Controls.Add(new Label { Text = "英文单词（音色不会英文时）", AutoSize = true, Font = new Font(Font, FontStyle.Bold) });
@@ -223,8 +222,7 @@ internal sealed class TextRulesForm : Form
 
     private void CollectSettings()
     {
-        Settings.RulePacks["slang.tsv"] = _packs.GetItemChecked(0);
-        Settings.RulePacks["templates.tsv"] = _packs.GetItemChecked(1);
+        Settings.RulePacks["templates.tsv"] = _packs.GetItemChecked(0);
         Settings.EnglishPolicy = (EnglishPolicy)Math.Max(0, _english.SelectedIndex);
         Settings.TitleDetection = _title.Checked;
         Settings.MarkdownClean = _markdown.Checked;
