@@ -5,6 +5,7 @@ using Xunit;
 
 namespace CaretReader.Tests;
 
+[Collection("TextLayerStatic")]   // TextLayer.For 有全局缓存，用到它的测试不能并行
 public class TextLayerTests
 {
     private static (string appDir, string settings) Setup()
