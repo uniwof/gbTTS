@@ -61,6 +61,12 @@ public class PacingTests
         Assert.Equal((float)(250.0 / 300), p.ResolveSpeed("v", 1.0f), 3);   // 旧倍数 1.0 → 目标 250 → 250/300
         Assert.Equal(250, p.Store.TargetCpm);
         Assert.Equal((float)(250.0 / 300), p.ResolveSpeed("v", 1.0f), 3);
+        // 新界面上线前：用户把旧语速框改成 1.2 → 目标重新换算为 1.2×300=360
+        Assert.Equal(1.2f, p.ResolveSpeed("v", 1.2f), 3);
+        Assert.Equal(360, p.Store.TargetCpm);
+        // 新界面直接改目标（不动旧框）→ 用新目标
+        p.Store.TargetCpm = 270;
+        Assert.Equal((float)(270.0 / 300), p.ResolveSpeed("v", 1.2f), 3);
     }
 
     [Fact]
