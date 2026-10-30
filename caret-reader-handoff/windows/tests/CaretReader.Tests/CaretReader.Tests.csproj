@@ -18,4 +18,5 @@
   <ItemGroup>
     <None Include="../corpus/*.tsv" Link="corpus/%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
+  <ItemGroup><None Include="../golden.tsv" Link="golden.tsv" CopyToOutputDirectory="PreserveNewest" /></ItemGroup>
 </Project>
