@@ -59,8 +59,26 @@ if ($WithVoice) {
     python "$Here\packs.py" assemble "$Here\pk\voices" chaowen-0
     Copy-Item "$Here\config\samples\chaowen-0.mp3" "$Here\pk\voices\chaowen-0\sample.mp3"
     $Voices = @('chaowen-0')
-    Step '4b. 第 2 轮节奏检查：中文路径加载、去首尾静音、字/分统一（清朗）'
-    & $Harness pace "$Here\pk\voices\chaowen-0" | Out-Host
+    Step '4b. 第 2 轮检查：转换脚本 + 中文路径加载、去首尾静音、字/分统一（清朗 + 转换出的音色）'
+    # 转换脚本自动检查：把官方 chaowen onnx 去掉 sherpa 元数据（= 朋友刚从 Piper 导出的样子），
+    # 用 tools/onnx2voicepack.py 转到中文路径下，再和清朗一起跑节奏检查（sherpa 能加载 + 跨音色字/分误差）
+    python -m pip install --quiet "onnx==1.17.0" "numpy<3"
+    $Friend = Join-Path $env:TEMP '朋友的模型'
+    $Conv = Join-Path $env:TEMP '转换输出 测试\voices'
+    foreach ($d in $Friend, $Conv) { if (Test-Path $d) { Remove-Item $d -Recurse -Force } }
+    New-Item -ItemType Directory -Force $Friend | Out-Null
+    python -c "import onnx,sys; m=onnx.load(sys.argv[1]); del m.metadata_props[:]; onnx.save(m, sys.argv[2])" "$cw\zh_CN-chaowen-medium.onnx" "$Friend\friend-voice.onnx"
+    Copy-Item "$cw\zh_CN-chaowen-medium.onnx.json" "$Friend\friend-voice.onnx.json"
+    python "$Here\tools\onnx2voicepack.py" $Friend $Conv --name '转换测试'
+    if ($LASTEXITCODE -ne 0) { throw "onnx2voicepack.py 转换失败（退出码 $LASTEXITCODE）" }
+    New-Item -ItemType Directory -Force "$Friend\bad" | Out-Null
+    Set-Content "$Friend\bad\x.ckpt" 'x'
+    $PSNativeCommandUseErrorActionPreference = $false   # 这一步预期退出码 2
+    python "$Here\tools\onnx2voicepack.py" "$Friend\bad" $Conv | Out-Host
+    $code = $LASTEXITCODE
+    $PSNativeCommandUseErrorActionPreference = $true
+    if ($code -ne 2) { throw "onnx2voicepack.py 对不认识的格式应退出码 2（实际 $code）" }
+    & $Harness pace "$Here\pk\voices\chaowen-0" "$Conv\friend-voice" | Out-Host
     if ($LASTEXITCODE -ne 0) { throw "第 2 轮节奏检查失败（退出码 $LASTEXITCODE）" }
 }
 
