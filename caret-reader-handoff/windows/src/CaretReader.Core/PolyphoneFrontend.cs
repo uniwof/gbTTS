@@ -552,6 +552,25 @@ public sealed class PolyphoneFrontend
     /// </summary>
     public string ToEngineText(string text, PuaMap map)
     {
+        // P1：带拼音注释（字母读音、读音规则）的片段，直接按注释里的拼音换成 PUA；缺的音节退回原文
+        if (CaretReader.Core.Text.PinyinAnnotation.HasAny(text))
+        {
+            var outSb = new StringBuilder(text.Length);
+            CaretReader.Core.Text.PinyinAnnotation.Walk(text, (t, py) =>
+            {
+                if (py == null) { if (t.Length > 0) outSb.Append(ToEngineTextPlain(t, map)); return; }
+                var syl = py.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+                var puas = syl.Select(x => map.Get(x)).ToList();
+                if (puas.All(x => x != null)) foreach (var x in puas) outSb.Append(x);
+                else outSb.Append(ToEngineTextPlain(t, map));
+            });
+            return outSb.ToString();
+        }
+        return ToEngineTextPlain(text, map);
+    }
+
+    private string ToEngineTextPlain(string text, PuaMap map)
+    {
         var rd = G2P(text);
         Sandhi(rd);
         var sb = new StringBuilder(text.Length);
