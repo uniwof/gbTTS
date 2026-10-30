@@ -1,0 +1,39 @@
+# 词库 A 人工修正（覆盖 pinyin-pro 自动生成数据里的错读；2026-10-14 按高频词人工核对）
+# 格式同用户词库：词 拼音（数字调，5=轻声）。只改有把握的错误，有两读或依语境而定的词不动。
+# —— 已知错误（实验时发现）——
+总行 zong3 hang2
+# —— 高频词核对 ——
+希腊人 xi1 la4 ren2
+罢了 ba4 le5
+等地方 deng3 di4 fang5
+美的 mei3 de5
+斯堪的纳维亚 si1 kan1 di4 na4 wei2 ya4
+起落架 qi3 luo4 jia4
+起落架轮 qi3 luo4 jia4 lun2
+落人口实 luo4 ren2 kou3 shi2
+藏传 zang4 chuan2
+吴基传 wu2 ji1 chuan2
+流血 liu2 xue4
+出血 chu1 xue4
+造血 zao4 xue4
+献血 xian4 xue4
+缺血 que1 xue4
+一针见血 yi1 zhen1 jian4 xue4
+咯血 ka3 xue4
+黄老邪 huang2 lao3 xie2
+小东邪 xiao3 dong1 xie2
+正邪 zheng4 xie2
+外邪 wai4 xie2
+魔邪 mo2 xie2
+除邪 chu2 xie2
+狎邪 xia2 xie2
+扶正压邪 fu2 zheng4 ya1 xie2
+放辟移邪 fang4 pi4 yi2 xie2
+郭振乾 guo1 zhen4 qian2
+公冶乾 gong1 ye3 qian2
+言伯乾 yan2 bo2 qian2
+王丙乾 wang2 bing3 qian2
+康立乾 kang1 li4 qian2
+王体乾 wang2 ti3 qian2
+胡孝乾 hu2 xiao4 qian2
+徐乾学 xu2 qian2 xue2

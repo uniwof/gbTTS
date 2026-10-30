@@ -1,0 +1,96 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    CaretReader.App = Windows 桌面程序（WinForms 界面）。
+    可以在 Linux 上“交叉编译”出 Windows 的 exe（EnableWindowsTargeting=true）。
+
+    发布命令（生成单个 exe + 两个原生 DLL）：
+      dotnet publish src/CaretReader.App -c Release -r win-x64
+  -->
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <UseWindowsForms>true</UseWindowsForms>
+    <EnableWindowsTargeting>true</EnableWindowsTargeting>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <LangVersion>latest</LangVersion>
+    <RootNamespace>CaretReader.App</RootNamespace>
+    <AssemblyName>CaretReader</AssemblyName>
+    <ApplicationHighDpiMode>SystemAware</ApplicationHighDpiMode>
+    <ApplicationIcon>app.ico</ApplicationIcon>
+    <Version>0.6.0</Version>
+    <!-- v0.3：程序清单（UTF-8 代码页），见 app.manifest -->
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <Product>光标朗读</Product>
+    <Company>personal</Company>
+
+    <!-- ===== 发布设置 ===== -->
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <!-- 自带 .NET 运行时：用户电脑上不需要另外安装 .NET -->
+    <SelfContained>true</SelfContained>
+    <!-- 打包成一个 exe -->
+    <PublishSingleFile>true</PublishSingleFile>
+    <!-- 压缩 exe，体积大约减半（启动时多花几十毫秒解压） -->
+    <EnableCompressionInSingleFile>true</EnableCompressionInSingleFile>
+    <!--
+      原生 DLL（onnxruntime.dll / sherpa-onnx-c-api.dll）不塞进 exe，而是放在 exe 旁边。
+      好处：不用每次启动解压到临时文件夹，也更不容易被杀毒软件误拦。
+    -->
+    <IncludeNativeLibrariesForSelfExtract>false</IncludeNativeLibrariesForSelfExtract>
+    <!-- WinForms 不支持裁剪 (trimming)，所以关闭 -->
+    <PublishTrimmed>false</PublishTrimmed>
+    <!-- 不生成 .pdb 调试文件，减小发布包 -->
+    <DebugType>none</DebugType>
+    <GenerateDocumentationFile>false</GenerateDocumentationFile>
+    <SatelliteResourceLanguages>zh-Hans</SatelliteResourceLanguages>
+    <!-- 用不到的运行时功能关掉，略微减小体积 -->
+    <InvariantGlobalization>false</InvariantGlobalization>
+    <UseSystemResourceKeys>false</UseSystemResourceKeys>
+    <!-- 允许 COM 互操作（UI Automation 需要） -->
+    <BuiltInComInteropSupport>true</BuiltInComInteropSupport>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../CaretReader.Core/CaretReader.Core.csproj" />
+    <!-- 播放声音（只用到 WaveOutEvent，体积很小） -->
+    <PackageReference Include="NAudio.WinMM" Version="2.2.1" />
+    <!-- Windows UI 自动化 (UIA) 的 COM 接口定义，用于读取“光标后面的文字” -->
+    <PackageReference Include="Interop.UIAutomationClient" Version="10.19041.0" />
+    <!-- v0.4：纯 C# 的 MP3 解码（播放音色包的试听 sample.mp3），不依赖系统自带的 MP3 解码器 -->
+    <PackageReference Include="NLayer" Version="3.0.0" />
+  </ItemGroup>
+  <ItemGroup>
+    <!-- v0.5：“关于 / 第三方许可”文字也嵌进程序里（程序文件夹里的同名文件被删了也能显示） -->
+    <EmbeddedResource Include="../../frontend/THIRD_PARTY_NOTICES.txt" LogicalName="THIRD_PARTY_NOTICES.txt" />
+    <!-- v0.6：悬浮球小猫精灵图（mascot/draw_mascot.py 生成） -->
+    <EmbeddedResource Include="../../mascot/sprites.png" LogicalName="sprites.png" />
+    <EmbeddedResource Include="../../mascot/sprites.json" LogicalName="sprites.json" />
+  </ItemGroup>
+
+  <!--
+    体积优化：.NET 的“Windows 桌面运行时”里同时包含 WinForms 和 WPF。
+    本程序只用 WinForms，所以发布时把 WPF 相关的文件去掉（约 40MB 未压缩）。
+    这些文件程序从不引用（已用依赖分析确认），去掉不影响功能。
+    万一在某台电脑上启动报“找不到程序集”，可以用下面的命令发布“完整版”（多约 20MB）：
+      dotnet publish ... -p:KeepAllFrameworkFiles=true
+  -->
+  <PropertyGroup>
+    <_UnusedFrameworkFiles>^(Presentation.*|WindowsBase|System\.Xaml|ReachFramework|System\.Printing|System\.Windows\.Controls\.Ribbon|WindowsFormsIntegration|UIAutomationClient|UIAutomationClientSideProviders|UIAutomationProvider|UIAutomationTypes|DirectWriteForwarder|System\.Windows\.Input\.Manipulations|System\.Windows\.Presentation|System\.IO\.Packaging|System\.Windows\.Forms\.Design|System\.Windows\.Forms\.Design\.Editors|Microsoft\.VisualBasic\.Forms|System\.DirectoryServices|PenImc_cor3|wpfgfx_cor3|D3DCompiler_47_cor3|vcruntime140_cor3|PresentationNative_cor3)$</_UnusedFrameworkFiles>
+  </PropertyGroup>
+  <!-- 在“解析运行时文件”这一步就把它们去掉，这样生成的 deps.json 清单里也不会再列出它们 -->
+  <Target Name="RemoveUnusedWpfFiles" AfterTargets="ResolveRuntimePackAssets" Condition="'$(RuntimeIdentifier)' != '' And '$(KeepAllFrameworkFiles)' != 'true'">
+    <ItemGroup>
+      <RuntimePackAsset Remove="@(RuntimePackAsset)"
+        Condition="$([System.Text.RegularExpressions.Regex]::IsMatch('%(Filename)', '$(_UnusedFrameworkFiles)'))" />
+    </ItemGroup>
+  </Target>
+  <!-- 再从“要发布的文件”列表里去掉（双保险：清单和文件都不含 WPF） -->
+  <Target Name="RemoveUnusedWpfPublishFiles" AfterTargets="ComputeResolvedFilesToPublishList" Condition="'$(KeepAllFrameworkFiles)' != 'true'">
+    <ItemGroup>
+      <ResolvedFileToPublish Remove="@(ResolvedFileToPublish)"
+        Condition="$([System.Text.RegularExpressions.Regex]::IsMatch('%(Filename)', '$(_UnusedFrameworkFiles)'))" />
+    </ItemGroup>
+  </Target>
+
+</Project>

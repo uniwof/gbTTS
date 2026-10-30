@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<!--
+  v0.3 新增：程序清单 (manifest)。
+  activeCodePage = UTF-8（Windows 10 1903 及以上生效）：让传给原生库（sherpa-onnx）的文字和路径一律按 UTF-8 编码。
+  sherpa-onnx 内部本来就把路径当 UTF-8 处理，所以中文路径也能正确打开。
+  （更旧的 Windows 10 会忽略这一项；程序另外用“相对路径 / 短路径”保证模型能打开，见 NativePaths.cs）
+  高 DPI 设置不写在这里，仍由项目文件里的 ApplicationHighDpiMode 控制（和 v0.2 一样）。
+-->
+<assembly xmlns="urn:schemas-microsoft-com:asm.v1" manifestVersion="1.0">
+  <assemblyIdentity version="0.4.0.0" name="CaretReader.app"/>
+  <trustInfo xmlns="urn:schemas-microsoft-com:asm.v2">
+    <security>
+      <requestedPrivileges xmlns="urn:schemas-microsoft-com:asm.v3">
+        <requestedExecutionLevel level="asInvoker" uiAccess="false"/>
+      </requestedPrivileges>
+    </security>
+  </trustInfo>
+  <application xmlns="urn:schemas-microsoft-com:asm.v3">
+    <windowsSettings>
+      <activeCodePage xmlns="http://schemas.microsoft.com/SMI/2019/WindowsSettings">UTF-8</activeCodePage>
+    </windowsSettings>
+  </application>
+</assembly>

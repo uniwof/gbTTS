@@ -1,0 +1,15 @@
+{
+ "cell": 160,
+ "frames": {
+  "idle": 0,
+  "blink": 1,
+  "page1": 2,
+  "page2": 3,
+  "page3": 4,
+  "talk0": 5,
+  "talk1": 6,
+  "talk2": 7,
+  "look": 8,
+  "sleep": 9
+ }
+}

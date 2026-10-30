@@ -1,0 +1,84 @@
+光标朗读 · 关于 / 第三方许可
+================================
+
+光标朗读是离线朗读软件，个人自用。本软件用到了下列开源项目和数据，在此注明版权与许可证。
+许可证全文见程序文件夹里的 licenses 文件夹。
+
+一、多音字词库与拼音数据（v0.5 起，用于多音字前端）
+----------------------------------------------------------------
+1. phrase-pinyin-data —— 词语拼音数据（pinyin.txt、overwrite.txt、di.txt）
+   Copyright (c) 2017 mozillazg
+   许可证：MIT License
+   https://github.com/mozillazg/phrase-pinyin-data
+
+2. pinyin-data —— 汉字拼音数据（生僻字补充读音表）
+   Copyright (c) 2016 mozillazg
+   许可证：MIT License
+   https://github.com/mozillazg/pinyin-data
+
+3. pinyin-pro —— 词语拼音数据（packages/data 中的 complete.json）
+   Copyright (c) 2022-present zh-lx
+   数据包 packages/data：Copyright (c) 2024 Chinese-Data
+   许可证：MIT License
+   https://github.com/zh-lx/pinyin-pro
+
+4. PaddleSpeech —— 人工整理的多音词表（polyphonic.yaml）
+   Copyright (c) PaddlePaddle Authors. All Rights Reserved.
+   许可证：Apache License 2.0
+   https://github.com/PaddlePaddle/PaddleSpeech
+   说明：本软件只使用了其中的多音词数据（转换成了纯文本词表），未使用 PaddleSpeech 的程序代码；
+         “必读轻声词表”没有启用。
+
+5. python-pinyin（pypinyin）—— 内置单字 / 词组拼音表与转换规则（数据导出后由本软件读取）
+   Copyright (c) 2016 mozillazg, 闲耘 <hotoo.cn@gmail.com>
+   许可证：MIT License
+   https://github.com/mozillazg/python-pinyin
+
+6. jieba（结巴中文分词）—— 分词词典 dict.txt、未登录词 HMM 参数，分词算法移植为 C#
+   Copyright (c) 2013 Sun Junyi
+   许可证：MIT License
+   https://github.com/fxsjy/jieba
+
+本软件没有使用汉典、《新华字典》、《现代汉语词典》等来源不清的词表数据，也没有使用 CC-CEDICT。
+
+二、语音引擎与程序组件
+----------------------------------------------------------------
+7. sherpa-onnx —— 离线语音合成引擎
+   Copyright (c) Xiaomi Corporation and the k2-fsa contributors
+   许可证：Apache License 2.0
+   https://github.com/k2-fsa/sherpa-onnx
+
+8. ONNX Runtime —— Copyright (c) Microsoft Corporation，许可证：MIT License
+   https://github.com/microsoft/onnxruntime
+
+9. NAudio —— Copyright (c) Mark Heath & contributors，许可证：MIT License
+   https://github.com/naudio/NAudio
+
+10. .NET 运行库 —— Copyright (c) .NET Foundation and Contributors，许可证：MIT License
+   https://github.com/dotnet/runtime
+
+音色模型的来源与许可见各音色包文件夹里的 README / LICENSE / MODEL_CARD 文件。
+
+----------------------------------------------------------------
+MIT License（以上标注 MIT 的项目均适用，版权人见各项）
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+Apache License 2.0 全文：licenses/PaddlePaddle_PaddleSpeech_Apache-2.0.txt
+（http://www.apache.org/licenses/LICENSE-2.0）

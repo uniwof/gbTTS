@@ -1,0 +1,26 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    CaretReader.Core = 跨平台的“核心逻辑”库（不含任何 Windows 界面代码）。
+    放在这里的代码在 Linux 上也能编译、能测试：
+      - 文本切分 + 标点停顿 (TextSplitter)
+      - 设置文件读写 (AppSettings)
+      - 音色/模型清单 voices.json (VoiceCatalog)
+      - sherpa-onnx 语音合成封装 (TtsEngine)
+      - “边合成边播放”的流水线 (SpeechPipeline)
+  -->
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>CaretReader.Core</RootNamespace>
+    <LangVersion>latest</LangVersion>
+    <DebugType Condition="'$(Configuration)'=='Release'">none</DebugType>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- 离线语音合成引擎。这个包会自动带上 Windows / Linux 等平台的原生 DLL。 -->
+    <PackageReference Include="org.k2fsa.sherpa.onnx" Version="1.13.8" />
+  </ItemGroup>
+
+</Project>

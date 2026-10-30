@@ -1,0 +1,191 @@
+using System.Runtime.InteropServices;
+
+namespace CaretReader.App;
+
+/// <summary>
+/// v0.6 新增的系统函数：前台窗口事件钩子、分层窗口（悬浮球）绘制、权限级别检测、修饰键释放等。
+/// </summary>
+internal static partial class Native
+{
+    // ---------- 窗口样式 ----------
+    public const int WS_EX_TOPMOST = 0x00000008;
+    public const int WS_EX_TOOLWINDOW = 0x00000080;   // 不进任务栏、不进 Alt+Tab
+    public const int WS_EX_LAYERED = 0x00080000;      // 分层窗口：每个像素自带透明度（圆形悬浮球）
+    public const int WS_EX_TRANSPARENT = 0x00000020;  // 鼠标穿透（提示气泡用）
+    public const int WM_NCHITTEST = 0x0084, HTCLIENT = 1;
+    public const int WM_DISPLAYCHANGE = 0x007E, WM_DPICHANGED = 0x02E0;
+
+    public static readonly IntPtr HWND_TOPMOST = new(-1), HWND_NOTOPMOST = new(-2);
+    public const uint SWP_NOSIZE = 0x0001, SWP_NOMOVE = 0x0002, SWP_NOACTIVATE = 0x0010, SWP_SHOWWINDOW = 0x0040, SWP_NOOWNERZORDER = 0x0200;
+
+    [DllImport("user32.dll", SetLastError = true)]
+    public static extern bool SetWindowPos(IntPtr hWnd, IntPtr after, int x, int y, int cx, int cy, uint flags);
+
+    [DllImport("user32.dll")] public static extern IntPtr GetAncestor(IntPtr hwnd, uint flags);
+    public const uint GA_ROOT = 2;
+    [DllImport("user32.dll")] public static extern bool IsWindowVisible(IntPtr h);
+    [DllImport("user32.dll")] public static extern bool IsIconic(IntPtr h);
+    [DllImport("user32.dll")] public static extern uint GetDpiForWindow(IntPtr h);
+
+    // ---------- 前台窗口 / 焦点事件钩子 ----------
+    public const uint EVENT_SYSTEM_FOREGROUND = 0x0003, EVENT_OBJECT_FOCUS = 0x8005;
+    public const uint WINEVENT_OUTOFCONTEXT = 0x0000, WINEVENT_SKIPOWNPROCESS = 0x0002;
+    public delegate void WinEventProc(IntPtr hook, uint ev, IntPtr hwnd, int idObject, int idChild, uint thread, uint time);
+
+    [DllImport("user32.dll")]
+    public static extern IntPtr SetWinEventHook(uint min, uint max, IntPtr hmod, WinEventProc proc, uint pid, uint tid, uint flags);
+    [DllImport("user32.dll")] public static extern bool UnhookWinEvent(IntPtr hook);
+
+    // ---------- GetGUIThreadInfo（完整信息） ----------
+    [StructLayout(LayoutKind.Sequential)]
+    public struct RECTI { public int Left, Top, Right, Bottom; }
+
+    [StructLayout(LayoutKind.Sequential)]
+    public struct GUITHREADINFO_FULL
+    {
+        public int cbSize, flags;
+        public IntPtr hwndActive, hwndFocus, hwndCapture, hwndMenuOwner, hwndMoveSize, hwndCaret;
+        public RECTI rcCaret;
+    }
+    [DllImport("user32.dll", EntryPoint = "GetGUIThreadInfo")]
+    private static extern bool GetGUIThreadInfoFull(uint idThread, ref GUITHREADINFO_FULL info);
+
+    /// <summary>拿某个窗口所在线程的焦点控件 / 光标窗口（不要求它在前台；拿不到返回 Zero）。</summary>
+    public static (IntPtr focus, IntPtr caret) ThreadFocusOf(IntPtr anyWindowOfThread)
+    {
+        if (anyWindowOfThread == IntPtr.Zero) return (IntPtr.Zero, IntPtr.Zero);
+        uint tid = GetWindowThreadProcessId(anyWindowOfThread, out _);
+        var info = new GUITHREADINFO_FULL { cbSize = Marshal.SizeOf<GUITHREADINFO_FULL>() };
+        return GetGUIThreadInfoFull(tid, ref info) ? (info.hwndFocus, info.hwndCaret) : (IntPtr.Zero, IntPtr.Zero);
+    }
+
+    // ---------- 分层窗口绘制 ----------
+    [StructLayout(LayoutKind.Sequential)] public struct POINT { public int X, Y; }
+    [StructLayout(LayoutKind.Sequential)] public struct SIZE { public int cx, cy; }
+    [StructLayout(LayoutKind.Sequential, Pack = 1)]
+    public struct BLENDFUNCTION { public byte BlendOp, BlendFlags, SourceConstantAlpha, AlphaFormat; }
+    public const int ULW_ALPHA = 2;
+    public const byte AC_SRC_OVER = 0, AC_SRC_ALPHA = 1;
+
+    [DllImport("user32.dll", SetLastError = true)]
+    public static extern bool UpdateLayeredWindow(IntPtr hwnd, IntPtr hdcDst, ref POINT pptDst, ref SIZE psize, IntPtr hdcSrc,
+                                                  ref POINT pprSrc, int crKey, ref BLENDFUNCTION pblend, int dwFlags);
+    [DllImport("user32.dll")] public static extern IntPtr GetDC(IntPtr hWnd);
+    [DllImport("user32.dll")] public static extern int ReleaseDC(IntPtr hWnd, IntPtr hDC);
+    [DllImport("gdi32.dll")] public static extern IntPtr CreateCompatibleDC(IntPtr hDC);
+    [DllImport("gdi32.dll")] public static extern bool DeleteDC(IntPtr hdc);
+    [DllImport("gdi32.dll")] public static extern IntPtr SelectObject(IntPtr hDC, IntPtr hObject);
+    [DllImport("gdi32.dll")] public static extern bool DeleteObject(IntPtr hObject);
+
+    [StructLayout(LayoutKind.Sequential)]
+    public struct BITMAPINFOHEADER
+    {
+        public int biSize, biWidth, biHeight; public short biPlanes, biBitCount; public int biCompression, biSizeImage, biXPelsPerMeter, biYPelsPerMeter, biClrUsed, biClrImportant;
+    }
+    [DllImport("gdi32.dll")]
+    public static extern IntPtr CreateDIBSection(IntPtr hdc, ref BITMAPINFOHEADER bmi, uint usage, out IntPtr bits, IntPtr hSection, uint offset);
+
+    // ---------- GDI 对象数（资源实测用） ----------
+    [DllImport("user32.dll")] private static extern uint GetGuiResources(IntPtr hProcess, uint flags);
+    public static uint GdiObjects() { try { return GetGuiResources(System.Diagnostics.Process.GetCurrentProcess().Handle, 0); } catch { return 0; } }
+
+    // ---------- 全屏程序检测（看视频 / 玩游戏时暂停动画） ----------
+    [DllImport("shell32.dll")] private static extern int SHQueryUserNotificationState(out int state);
+    /// <summary>前台是全屏 D3D 程序 / 演示模式 / 全屏应用时返回 true。</summary>
+    public static bool ForegroundIsFullscreen()
+    {
+        try
+        {
+            if (SHQueryUserNotificationState(out int s) == 0)
+                return s is 2 /*BUSY 全屏*/ or 3 /*D3D 全屏*/ or 4 /*演示模式*/;
+        }
+        catch { }
+        return false;
+    }
+
+    // ---------- 权限级别（UIPI）：目标程序以管理员身份运行时，普通权限的我们读不到它的文字 ----------
+    [DllImport("kernel32.dll", SetLastError = true)] private static extern IntPtr OpenProcess(uint access, bool inherit, uint pid);
+    [DllImport("kernel32.dll")] private static extern bool CloseHandle(IntPtr h);
+    [DllImport("advapi32.dll", SetLastError = true)] private static extern bool OpenProcessToken(IntPtr proc, uint access, out IntPtr token);
+    [DllImport("advapi32.dll", SetLastError = true)]
+    private static extern bool GetTokenInformation(IntPtr token, int cls, IntPtr info, int len, out int retLen);
+    [DllImport("advapi32.dll")] private static extern IntPtr GetSidSubAuthority(IntPtr sid, uint n);
+    [DllImport("advapi32.dll")] private static extern IntPtr GetSidSubAuthorityCount(IntPtr sid);
+    [DllImport("kernel32.dll")] private static extern IntPtr GetCurrentProcess();
+    private const uint PROCESS_QUERY_LIMITED_INFORMATION = 0x1000, TOKEN_QUERY = 0x0008;
+    private const int TokenIntegrityLevel = 25;
+
+    /// <summary>
+    /// 进程的完整性级别（0x2000 普通、0x3000 管理员、0x4000 系统）。
+    /// 返回 -1 = 查不到（打开令牌被拒绝：几乎总是因为对方权限比我们高）。
+    /// </summary>
+    public static int IntegrityLevelOf(uint pid)
+    {
+        IntPtr proc = pid == (uint)Environment.ProcessId ? GetCurrentProcess() : OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid);
+        if (proc == IntPtr.Zero) return -1;
+        try
+        {
+            if (!OpenProcessToken(proc, TOKEN_QUERY, out var tok)) return -1;
+            try
+            {
+                GetTokenInformation(tok, TokenIntegrityLevel, IntPtr.Zero, 0, out int len);
+                if (len <= 0) return -1;
+                IntPtr buf = Marshal.AllocHGlobal(len);
+                try
+                {
+                    if (!GetTokenInformation(tok, TokenIntegrityLevel, buf, len, out _)) return -1;
+                    IntPtr sid = Marshal.ReadIntPtr(buf);   // TOKEN_MANDATORY_LABEL.Label.Sid
+                    int count = Marshal.ReadByte(GetSidSubAuthorityCount(sid));
+                    return Marshal.ReadInt32(GetSidSubAuthority(sid, (uint)(count - 1)));
+                }
+                finally { Marshal.FreeHGlobal(buf); }
+            }
+            finally { CloseHandle(tok); }
+        }
+        finally { if (pid != (uint)Environment.ProcessId) CloseHandle(proc); }
+    }
+
+    // ---------- 修饰键释放 ----------
+    [DllImport("user32.dll")] private static extern void keybd_event(byte vk, byte scan, uint flags, UIntPtr extra);
+    private const uint KEYEVENTF_KEYUP_ = 0x0002;
+    /// <summary>
+    /// 等用户松开 Ctrl / Alt / Shift / Win（最多 maxMs 毫秒）。超时仍按着时，向系统发送“松开”，
+    /// 先按一下没有用途的 0xE8 键，避免单独松开 Alt 时目标程序的菜单栏被激活（AutoHotkey 的做法）。
+    /// 返回 true = 修饰键已经全部松开。
+    /// </summary>
+    public static async Task<bool> WaitModifiersReleasedAsync(int maxMs)
+    {
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        while (AnyModifierDown() && sw.ElapsedMilliseconds < maxMs) await Task.Delay(15);
+        if (!AnyModifierDown()) return true;
+        keybd_event(0xE8, 0, 0, UIntPtr.Zero);
+        keybd_event(0xE8, 0, KEYEVENTF_KEYUP_, UIntPtr.Zero);
+        foreach (byte vk in new byte[] { 0xA2, 0xA3, 0xA4, 0xA5, 0xA0, 0xA1, 0x5B, 0x5C })   // 左右 Ctrl/Alt/Shift、Win
+            if ((GetAsyncKeyState(vk) & 0x8000) != 0) keybd_event(vk, 0, KEYEVENTF_KEYUP_, UIntPtr.Zero);
+        await Task.Delay(40);
+        return !AnyModifierDown();
+    }
+
+    // ---------- 让别的窗口回到前台 ----------
+    [DllImport("user32.dll")] private static extern bool AllowSetForegroundWindow(int pid);
+    [DllImport("user32.dll")] public static extern bool BringWindowToTop(IntPtr h);
+
+    /// <summary>
+    /// 把焦点还给 h 所在的程序并等它真的成为前台（最多 maxMs）。成功返回 true。
+    /// 只在本程序自己被激活过（例如打开过菜单 / 对话框）时才需要；正常点击悬浮球不会激活本程序。
+    /// </summary>
+    public static async Task<bool> RestoreForegroundAsync(IntPtr h, int maxMs)
+    {
+        if (h == IntPtr.Zero || !IsWindow(h)) return false;
+        if (GetForegroundWindow() == h) return true;
+        if (IsIconic(h)) return false;   // 最小化的窗口不去动它
+        SetForegroundWindow(h);
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        while (sw.ElapsedMilliseconds < maxMs)
+        {
+            if (GetForegroundWindow() == h) { await Task.Delay(60); return true; }   // 再等一下，让目标程序恢复内部焦点
+            await Task.Delay(20);
+        }
+        return GetForegroundWindow() == h;
+    }
+}
