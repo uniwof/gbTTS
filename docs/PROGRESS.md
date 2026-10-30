@@ -24,6 +24,11 @@
 - xUnit `PacingTests`：去静音首尾 ≤ 阈值、字/分换算、微调设置中文路径保存 + 升级不丢 + 坏文件跳过、pacing.tsv 错行跳过。
 - CI `TestHarness pace <音色包>`（build.ps1 第 4b 步，清朗）：中文路径加载合成、真实模型去静音（沙盒实测 190/174ms → 30/50ms）、目标 200/250/320 字/分实测误差 ≤ ±8%（沙盒 +3.4/+1.5/−2.9%）。多个音色时再比彼此误差。
 
+### 转换脚本（PR pace/onnx2voicepack）
+- `caret-reader-handoff/windows/tools/onnx2voicepack.py <朋友文件夹> <输出> --name 名字`；依赖 onnx/numpy/pypinyin。
+- CI：官方 chaowen onnx 去掉元数据 → 转换到中文路径 → 和清朗一起跑 pace（sherpa 加载 + 跨音色 ±8%）；.ckpt 文件夹必须退出码 2。
+- 沙盒实测：转换出的 tokens 与官方完全一致，sherpa 1.13.8 可加载，统一 250 字/分后两音色相差 0.4%。
+
 ### 下一步
-- tools/onnx2voicepack.py（Piper/VITS onnx 文件夹 → 音色包）。
-- CI 增加第 2、3 个音色做跨音色 ±8% 检查。
+- CI 再加一个不同快慢的真实音色（如 fanchen 某 sid）凑满 3 个音色。
+- 第 1 轮 v0.7-r1 发布后：测试清单_第2轮 + Release v0.7-r2。
