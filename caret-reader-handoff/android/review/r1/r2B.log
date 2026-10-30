@@ -1,0 +1,6 @@
+===== nvidia/nemotron-3-ultra-550b-a55b 0
+
+===== stepfun-ai/step-5-preview 1684
+1. **`start()` 非原子导致多路朗读**（Reader.kt `start()`）：`stop()` 与 `++gen` 分锁执行，两个入口（悬浮窗/分享菜单）同时触发时，后者 `stop()` 停不掉前者 worker（`stopGen` 仍小于前者 `myGen`），出现两路声音重叠、状态错乱。改法：`synchronized(lock){ stop(); myGen = ++gen; pausedFlag = false }`，或让 `stop()` 在锁内完成 `stopGen = ++gen` 并返回该 gen。
+
+2. **`stop()` 跨线程操作 AudioTra

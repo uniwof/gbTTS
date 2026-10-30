@@ -1,0 +1,11 @@
+===== stepfun-ai/step-5-preview 630
+K 你驳错了：标准 Android 里 `PROCESS_TEXT` 确实主要出现在可编辑文本（EditText/输入框）的选择菜单；Chrome 等只读选区通常不会注入第三方 `PROCESS_TEXT` 项。你说“只读也有”不成立。
+
+B 你驳回的理由不对：AccessibilityService 能启动前台服务，是因为系统绑定且用户显式启用的特权，与“后台启动 Activity”的白名单无关；Android 12+ 仍会抛 `ForegroundServiceStartNotAllowedException`，必须 try-catch，不能只靠“兜底继续朗读”。
+
+⑨ 采纳得有问题：`T
+===== nvidia/nemotron-3-ultra-550b-a55b 2784
+**驳回你的驳回（你判断失误的）：**
+
+1.  **A) AccessibilityNodeInfo 不 recycle 必崩**：**错**。`obtain()` 从池取，`recycle()` 还池。不还池导致池耗尽，后续 `obtain()` 返回 `null`，上层不判空直接用 → **NPE 崩溃**。这不是 GC 能解决的（对象未被回收，仍被池引用）。**必须在 `finally` 回收**，或用 `try-with-resources` (API 26+)。
+2.  **B) 无障碍后台启动前台服务被禁**：**错**。文档豁免的是“启动 **Activity**”，不是“启动

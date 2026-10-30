@@ -1,0 +1,9 @@
+**5. Zip 导入无 Zip Bomb 防护，3 GB 上限形同虚设**
+- 位置：`VoiceLibrary.importZip`
+- 为什么：`MAX_TOTAL` 只限制解压后总量，但未限制压缩率。一个 1 MB 的 zip 可解出 100 GB（zip bomb），`total` 在写出过程中才触发超限，临时目录可能先写满存储；且 `total shr 20 % 20` 的进度回调在超大文件时频繁 `progress()`，拖慢导入。
+- 怎么改：增加“单文件解压后不超过 2 GB”与“压缩率超过 100:1 即拒绝”的检查；进度回调改为每 50 MB 一次。
+
+**6. `stop()` 与 `start()` 的 `gen` 竞态：新朗读可能被立即误停**
+- 位置：`Reader.start` / `Reader.stop`
+- 为什么：`start()` 先调 `stop()`（此时 `stopGen = 旧gen`），再 `++gen`。若另一线程在 `++gen` 后、新线程启动前调用 `stop()`，`stopGen` 被设为新 `gen`，新朗读的 `stopped()` 立刻为 true，表现为“点了没反应”。
+- 怎么改：`stop()` 不应直接改 `stopGen`，而应把“取消目标”设为当前 `worker` 线程；或让 `start()` 在 `synchronized(

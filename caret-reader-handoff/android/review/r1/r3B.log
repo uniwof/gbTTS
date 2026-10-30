@@ -1,0 +1,6 @@
+===== nvidia/nemotron-3-ultra-550b-a55b 3630
+### 严重（阻塞/崩溃/数据竞争）
+
+1. **Reader.run:30 `Engine.use` 持有全局锁时在 `synchronized(lock)` 内阻塞**  
+   `Engine.use` 内部对引擎单例加锁（推测），而 `lock` 又被 `toggle/stop` 频繁争用。合成线程在 `lock.wait()` 或 `track.write()` 时持有 `lock`，导致 UI 线程调用 `toggle()` 卡死 → ANR。  
+   **改法**：把 `synchronized(lock)` 缩小到仅保护 `track/pausedFlag/state` 读写

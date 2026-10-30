@@ -1,0 +1,6 @@
+===== nvidia/nemotron-3-ultra-550b-a55b 0
+
+===== stepfun-ai/step-5-preview 1278
+1. **取文字覆盖缺口（功能表第 4 行）**：Windows 全局读光标后文字，Android 仅能读输入框 `textSelectionStart`，网页/PDF/聊天记录完全落空。改法：分享朗读、复制后朗读升为主路径；无障碍事件必须加 `typeViewTextSelectionChanged` 实时抓选区，不能只靠 `typeWindowStateChanged`。
+
+2. **Android 11+ 路径错误（音色包表格）**：`Android/data` 自 Android 11 起禁止数据线/文件管理器访问。改法：删除该说法；导入仅走 SAF，导出用 `MediaStore`。

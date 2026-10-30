@@ -1,0 +1,9 @@
+===== nvidia/nemotron-3-ultra-550b-a55b 44
+HTTP 504: upstream request deadline exceeded
+===== stepfun-ai/step-5-preview 1399
+按严重程度排序（编号即优先级）：
+
+**1. 无障碍节点泄漏（API<33 必崩）**
+- 位置：`TextGrab.grab` / `findSelection`
+- 为什么：`rootInActiveWindow`、`svc.windows`、`getChild` 返回的 `AccessibilityNodeInfo` 在 API 33 以下必须手动 `recycle()`。代码只遍历不回收，节点池迅速耗尽，后续 `findAccessibilityNodeInfosByText` 全部返回 null，表现为“突然取不到文字”。
+- 怎么改：BFS 队列中 poll 出的节点、`roots

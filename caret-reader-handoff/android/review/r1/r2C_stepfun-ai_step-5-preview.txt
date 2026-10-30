@@ -1,0 +1,15 @@
+1. **ReadTextActivity.kt `Reader.start(this, text, label)`**：Activity 下一步就 `finish()`，若 Reader 持有该 Context 会泄漏；分享/PROCESS_TEXT 入口应使用 `applicationContext`。改：`Reader.start(applicationContext, text, label)`。
+
+2. **Manifest `CaretTtsService` 及 `CheckVoiceData`/`GetSampleText`**：声明了系统 TTS 引擎入口，但代码未体现 `TextToSpeechService` 实现。若本应用只是调用系统 TTS，此声明会让它出现在系统“文字转语音引擎”列表里，用户切换后无语音可播。改：要么删除引擎声明，要么完整实现引擎接口并处理数据检查 Intent。
+
+3. **CaretAccessibilityService.kt `onKeyEvent` `swallowUp`**：匹配 DOWN 后置标志依赖后续 UP 清零；若应用切换、UP 被系统拦截或服务中断，标志残留会误吞下一次正常按键。改：DOWN 匹配时记录 `swallowUp` 与时间戳并加超时清理，或不跨事件依赖，直接消费 DOWN。
+
+4. **TextGrab.kt `grab` 第 2 步**：遍历 `svc.windows` 仅排除 `TYPE_ACCESSIBILITY_OVERLAY`，未排除 `TYPE_INPUT_METHOD_WINDOW`（输入法）与 `TYPE_SYSTEM`（状态栏/导航栏），可能朗读输入法或系统 UI 文字。改：增加 `w.type != TYPE_INPUT_METHOD_WINDOW && w.type != TYPE_SYSTEM` 过滤。
+
+5. **CaretAccessibilityService.kt `showBar`/`ACTION_MOVE`**：拖动边界用固定 `dpi(40f)`，未用悬浮条实际宽高（约 270×70dp），条可能被拖至仅剩一小块在屏幕内。改：视图 `post` 后取得 `outer.width/height`，再 `coerceIn(0, screenSize - viewSize)`。
+
+6. **TextGrab.kt `fromEditable`**：`textSelectionStart` 为 -1 时进入 `else -> Result(text,...)` 朗读整个输入框，可能读出大量无关历史文本。改：`s < 0` 时返回 `null` 或提示“未检测到光标”。
+
+7. **CaretAccessibilityService.kt `isEnabled`**：以 `instance != null` 作为兜底，服务绑定/解绑与静态字段更新存在时间差，可能误判。改：仅用 `Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES` 或 `AccessibilityManager.getEnabledAccessibilityServiceList`。
+
+8. **accessibility_service.xml**：仅注册 `typeWindowStateChanged`，事件类型过窄；部分 ROM 对仅请求过滤按键的服务可能不保证事件分发（推测）。改：补充 `typeViewFocused|typeWindowContentChanged` 以确保服务活跃与按键拦截可靠。

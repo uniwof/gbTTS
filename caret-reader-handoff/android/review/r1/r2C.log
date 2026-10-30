@@ -1,0 +1,6 @@
+===== nvidia/nemotron-3-ultra-550b-a55b 0
+
+===== stepfun-ai/step-5-preview 1537
+1. **ReadTextActivity.kt `Reader.start(this, text, label)`**：Activity 下一步就 `finish()`，若 Reader 持有该 Context 会泄漏；分享/PROCESS_TEXT 入口应使用 `applicationContext`。改：`Reader.start(applicationContext, text, label)`。
+
+2. **Manifest `CaretTtsService` 及 `CheckVoiceData`/`GetSampleText`**：声明了系统 TTS 引擎入口，但代码未体现 `Te

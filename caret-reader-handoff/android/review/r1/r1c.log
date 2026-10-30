@@ -1,0 +1,7 @@
+===== stepfun-ai/step-5-preview 616
+**5. Zip 导入无 Zip Bomb 防护，3 GB 上限形同虚设**
+- 位置：`VoiceLibrary.importZip`
+- 为什么：`MAX_TOTAL` 只限制解压后总量，但未限制压缩率。一个 1 MB 的 zip 可解出 100 GB（zip bomb），`total` 在写出过程中才触发超限，临时目录可能先写满存储；且 `total shr 20 % 20` 的进度回调在超大文件时频繁 `progress()`，拖慢导入。
+- 怎么改：增加“单文件解压后不超过 2 GB”与“压缩率超过 100:1 即拒绝”的检查；进度回调改为每 50 MB 一次。
+
+**6. `sto

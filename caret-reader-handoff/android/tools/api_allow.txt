@@ -1,0 +1,20 @@
+# 用 Android 6.0 (API 23) 编译时会报“找不到”的高版本 API。每一行都已人工确认：调用处被 Build.VERSION.SDK_INT 判断保护。
+CaretAccessibilityService.kt:AccessibilityButtonController   # SDK_INT >= 26
+CaretAccessibilityService.kt:accessibilityButtonController   # SDK_INT >= 26
+CaretAccessibilityService.kt:cannot infer type for type parameter 'T'. Specify it explicitly.
+CaretAccessibilityService.kt:T
+CaretAccessibilityService.kt:R
+CaretAccessibilityService.kt:fun <T, R> T.let(block: (T) -> R): R
+ReaderService.kt:NotificationChannel                          # SDK_INT >= 26
+ReaderService.kt:fun startForeground(p0: Int, p1: Notification!): Unit   # 3 参数版本 SDK_INT >= 29
+ReaderService.kt:FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK       # SDK_INT >= 29
+ReaderService.kt:STOP_FOREGROUND_REMOVE                       # SDK_INT >= 24
+ReaderService.kt:getNotificationChannel                       # SDK_INT >= 26
+ReaderService.kt:createNotificationChannel                    # SDK_INT >= 26
+ReaderService.kt:IMPORTANCE_LOW                               # SDK_INT >= 26
+ReaderService.kt:T
+ReaderService.kt:setShowBadge                                 # SDK_INT >= 26
+ReaderService.kt:setSound                                     # SDK_INT >= 26
+ReaderService.kt:constructor(p0: Context!): Notification.Builder   # Builder(ctx, channel) SDK_INT >= 26
+ReaderService.kt:startForegroundService                       # SDK_INT >= 26
+TextGrab.kt:isShowingHintText                                 # SDK_INT >= 26

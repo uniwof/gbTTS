@@ -1,0 +1,9 @@
+K 你驳错了：标准 Android 里 `PROCESS_TEXT` 确实主要出现在可编辑文本（EditText/输入框）的选择菜单；Chrome 等只读选区通常不会注入第三方 `PROCESS_TEXT` 项。你说“只读也有”不成立。
+
+B 你驳回的理由不对：AccessibilityService 能启动前台服务，是因为系统绑定且用户显式启用的特权，与“后台启动 Activity”的白名单无关；Android 12+ 仍会抛 `ForegroundServiceStartNotAllowedException`，必须 try-catch，不能只靠“兜底继续朗读”。
+
+⑨ 采纳得有问题：`TYPE_VIEW_TEXT_SELECTION_CHANGED` 是高频事件，缓存 2 分钟内所有选中文字既占内存又有隐私风险（密码、验证码会被记录）。应只保留最近一次选中，限制长度（如 4KB），用后即清。
+
+⑥ 按键吞 UP 的逻辑有漏洞：长按重复只吞 DOWN 可以，但若 UP 也被吞，调用方无法感知释放；应放行 UP 或单独置释放标志，否则外部状态机不一致。
+
+I 你部分说错：largeHeap 并非“常见 512MB”，很多机型只给 256MB 甚至更低；105MB 模型若走 JNI/native 或 mmap 确实不占 Java 堆，但若用 `ByteBuffer.allocate()` 或 `byte[]` 就在堆上。结论对，理由要修正。

@@ -1,0 +1,66 @@
+### 严重程度编号审查
+
+#### 1. 【致命】硬链接跨分区/文件系统必崩，且无原子性保证
+**位置**：`VoiceLibrary.installFrom` 第 130 行 `android.system.Os.link(tw.absolutePath, out.absolutePath)`
+**原因**：
+- Android 10+ 分区存储：`importDir` (data/user/0/...) 与 `externalDir` (sdcard/Android/data/...) 常在**不同文件系统**（ext4 vs f2fs/exFAT/FUSE），`Os.link` 抛 `ErrnoException(EXDEV)` 导致链接失败，回退 `copyTo` 但**未捕获异常**，直接崩溃。
+- 即使同分区，目标文件已存在 `Os.link` 抛 `EEXIST`，代码无 `try-catch` 处理。
+- 非原子操作：复制/链接中途崩溃/断电留下残包，`refresh` 会把残包当合法音色入库。
+**改法**：
+1. 先 `StatFs` 对比 `tw` 与 `dest` 的 `dev` 号（`Os.stat`），跨设备直接走复制。
+2. 统一用 **临时文件 + `renameTo` 原子替换**：写入 `.part` → 校验 → `renameTo` 目标名。
+3. 整包导入采用 **事务目录**：解压/复制到 `.import-xxx.tmp` → 全部校验通过 → `renameTo` 正式目录名（同卷原子），失败整盘删除。
+
+#### 2. 【严重】SHA-256 全文件读取阻塞主线程，大模型（100 MB+）直接卡死 UI
+**位置**：`VoicePacks.sameContent` → `sha(File)` 全量流式读取；`modelKey` 读三段各 1 MB 尚可，但 `sameContent` 用于**每个导入文件逐个算全量哈希**。
+**原因**：低端机 2 核 + 4 GB，IO 竞争下单文件 200 MB 读完需 1–2 s，导入 10 个音色 = 20 s 白屏/ANR。`progress` 回调在同一线程，根本刷不出进度。
+**改法**：
+- `sameContent` 改为 **抽样对比**（首/中/尾各 64 KB + 文件长度），与 `modelKey` 逻辑一致。
+- 导入全流程 **必须在 `Dispatchers.IO` 协程/线程池** 跑，`progress` 用 `withContext(Dispatchers.Main)` 切回主线程。
+
+#### 3. 【严重】`DocumentsContract` 树复制无权限持久化，且递归深度硬编码 4 层
+**位置**：`importTree` 第 85 行 `depth > 4` 截断；`copy` 内部 `query` 无 `FLAG_PERSISTABLE_URI_PERMISSION`。
+**原因**：
+- 用户通过 SAF 选目录后，进程重启/系统回收权限，**Uri 失效**，二次进入设置页 `refresh` 读取 `externalDir` 为空 → 音色消失。
+- 真实音色包常 >4 层（如 `voice/en_us/vits/model.onnx`），直接漏文件。
+**改法**：
+1. `takePersistableUriPermission(tree, FLAG_READ)` 持久化权限，并在 `Application.onCreate` 恢复。
+2. 递归改 **显式栈/队列 BFS**，去掉深度限制；单次 `query` 限制 1000 条分页防 OOM。
+
+#### 4. 【严重】`safeRel` 仅检查 `..`，未规范化路径，Zip Slip 仍可绕过
+**位置**：`VoiceCatalog.safeRel` 第 210 行；`importZip` 第 62 行 `name.replace('\\', '/').trimStart('/')`。
+**原因**：`a/../../etc/passwd` 经 `trimStart('/')` 变 `a/../../etc/passwd`，`split('/').none { it == ".." }` 返回 `false` → **通过检查**，`File(tmp, name)` 解析为 `tmp/a/../../etc/passwd` → **跳出沙箱**。
+**改法**：`val canon = File(tmp, name).canonicalPath; require(canon.startsWith(tmp.canonicalPath))`。
+
+#### 5. 【中等】`StatFs.availableBytes` 仅看可用块，忽略 **配额/分区预留/文件系统碎片**，导入中途仍可能 `ENOSPC`
+**位置**：`installFrom` 第 115 行。
+**改法**：预留 **200 MB** 红线（而非 50 MB），且写入前 `fallocate`/`posix_fallocate` 预分配空间（API 21+ `FileChannel.force(true)` 近似）。
+
+#### 6. 【中等】`builtin_model.txt` 存**模型目录名**而非 `modelKey`，版本升级内置目录重命名即失效
+**位置**：`installFrom` 第 124 行 `writeText(sameBuiltin.modelDir)`；`loadDiskPack` 第 270 行 `builtinLookup(key)`。
+**改法**：写入 `sameBuiltin.modelKey`，查找时遍历 `builtins` 匹配 `modelKey`。
+
+#### 7. 【中等】`modelKey` 读取范围 `len/2 ± 0.5 MB` 对小模型（<2 MB）重叠/越界，哈希退化
+**位置**：`VoicePacks.modelKey` 第 245 行 `maxOf(0L, len / 2 - chunk / 2)`。
+**改法**：`len < 3*chunk` 时改为 **三等分采样**（0, len/3, 2*len/3），保证不重叠。
+
+#### 8. 【轻微】`parseManifest` 手写 JSON 去注释/小写键，极易漏边缘（Unicode 转义、十六进制、尾逗号嵌套）
+**位置**：`VoicePacks.parseManifest` 第 180 行。
+**改法**：引入 **Moshi/Kotlinx Serialization + JsonReader.setLenient(true)**，或至少用 `org.json.JSONTokener` 官方宽松解析。
+
+#### 9. 【轻微】`importZip` 缓冲区 `1 shl 16` (64 KB) 过小，低端机闪存写入放大严重
+**改法**：提升至 `256 KB` 或 `512 KB`，并 `BufferedOutputStream` 包装 `FileOutputStream`。
+
+#### 10. 【推测】`VoiceLibrary.catalog` 双重检查锁定 `synchronized(this)` 但 `cached` 是 `@Volatile`，`refresh` 直接 `cached = null` 无内存屏障保证可见性
+**改法**：用 `AtomicReference<VoiceCatalog?>` 或 `Mutex` + `volatile` 一致性模型。
+
+---
+
+### 重构要点摘要（给初学者直接套用）
+1. **全流程后台化**：`importZip/importTree/refresh` 签名加 `suspend`，挂 `Dispatchers.IO`。
+2. **事务目录 + 原子重命名**：`.import-xxx.tmp` → 校验 → `renameTo` 正式名。
+3. **硬链接前置检查**：`Os.stat(src).st_dev == Os.stat(dst).st_dev` 且 `try { Os.link } catch (e: ErrnoException) -> copy`。
+4. **抽样哈希替代全量**：`sameContent` 与 `modelKey` 统一三段式采样。
+5. **SAF 权限持久化**：`ContentResolver.takePersistableUriPermission` + 启动时恢复。
+6. **路径规范化防 Zip Slip**：`canonicalPath.startsWith(base.canonicalPath)`。
+7. **模型指纹绑定**：`builtin_model.txt` 存 `modelKey` 而非目录名。

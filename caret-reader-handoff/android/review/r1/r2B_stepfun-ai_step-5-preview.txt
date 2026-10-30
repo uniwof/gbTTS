@@ -1,0 +1,13 @@
+1. **`start()` 非原子导致多路朗读**（Reader.kt `start()`）：`stop()` 与 `++gen` 分锁执行，两个入口（悬浮窗/分享菜单）同时触发时，后者 `stop()` 停不掉前者 worker（`stopGen` 仍小于前者 `myGen`），出现两路声音重叠、状态错乱。改法：`synchronized(lock){ stop(); myGen = ++gen; pausedFlag = false }`，或让 `stop()` 在锁内完成 `stopGen = ++gen` 并返回该 gen。
+
+2. **`stop()` 跨线程操作 AudioTrack**（Reader.kt `stop()`）：调用线程直接 `track?.flush()`，worker 可能正阻塞在 `t.write()`；AudioTrack 非线程安全，并发 flush/write 可能 native 崩溃（推测）。改法：`stop()` 只置 `stopGen` 并 `pause()`，`flush()/stop()/release()` 全部交 worker 的 `finally` 执行。
+
+3. **`playbackHeadPosition` 回绕导致结束误判**（Reader.kt `run()` 尾部）：`head` 为 32 位回绕值，`written` 为 64 位累加，超长文本（>2³² 帧）后 `head >= written` 恒假，只能靠 2 秒超时兜底，造成提前结束或延迟。改法：以初始 `playbackHeadPosition` 为基准计算已播帧数，或 `if ((written and 0xffffffffL) <= (head.toLong() and 0xffffffffL)) break`，并限制文本使 `written < 2³²`。
+
+4. **AudioTrack 初始化/写错误未处理**（Reader.kt `run()`/`PcmOut`）：`getMinBufferSize` 返回 `ERROR`/`ERROR_BAD_VALUE` 时未校验；`write` 返回负值仅静默退出，用户看到“读完了”而非失败。改法：启动前检查 `minBuf > 0`，`n < 0` 时记录错误并置 `message`，`finally` 优先展示错误。
+
+5. **前台服务 API 34+ 合规缺失**（ReaderService.kt）：`startForeground` 仅 catch 日志，Android 14 缺 `FOREGROUND_SERVICE_MEDIA_PLAYBACK` 权限必抛 `SecurityException`，导致无通知且进程易被回收（推测 manifest 未声明）。改法：manifest 加权限，catch 中 `stopSelf` 并降级为普通服务+通知。
+
+6. **`start()` 主线程预处理可能 ANR**（Reader.kt `start()`）：`TextGrab.clean`、`TextSplitter.split`、`Engine.isLoaded` 在调用方线程同步执行，低端机处理长文本可能卡 UI。改法：仅取文字和 label，split/引擎检查移入 worker，UI 先进入 LOADING。
+
+7. **LOADING 暂停提示被覆盖 + 焦点流过时**（Reader.kt `toggle()`/`requestFocus()`）：加载中暂停设的 `message` 被 `run()` 就绪后的 `set()` 覆盖；`requestAudioFocus` 用 `STREAM_MUSIC`，API 26+ 应传 `AudioAttributes`。改法：用 `pendingPauseAfterLoad` 标志保留提示；焦点请求改 `AudioAttributes` 重载，低版本保留旧 API。

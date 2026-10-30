@@ -1,0 +1,21 @@
+**驳回你的驳回（你判断失误的）：**
+
+1.  **A) AccessibilityNodeInfo 不 recycle 必崩**：**错**。`obtain()` 从池取，`recycle()` 还池。不还池导致池耗尽，后续 `obtain()` 返回 `null`，上层不判空直接用 → **NPE 崩溃**。这不是 GC 能解决的（对象未被回收，仍被池引用）。**必须在 `finally` 回收**，或用 `try-with-resources` (API 26+)。
+2.  **B) 无障碍后台启动前台服务被禁**：**错**。文档豁免的是“启动 **Activity**”，不是“启动 **前台服务** (FGS)”。Android 12+ (targetSdk 31+) 后台启动 FGS 直接抛 `ForegroundServiceStartNotAllowedException`。你的“兜底继续朗读”在 FGS 启动失败时进程极易被杀，保不住活。**必须改为：有 UI 时用 Activity 启动 FGS；无 UI 时用 `MediaSession` + `Media3` 前台服务，或仅依赖 `AudioTrack` + `PARTIAL_WAKE_LOCK` 无服务播放。**
+3.  **C) Reader 合成持锁导致 ANR**：**错**。你把“状态锁”和“合成锁”混为一谈。若 `synthesizeToFile` / 网络请求在 `synchronized(lock)` 内调用，主线程调 `stop()` 等锁，**必 ANR**。**必须：锁只保护状态字段，合成/IO 在锁外；用 `volatile`/`AtomicReference` 管理状态，或分离 `stateLock` 与 `ioLock`。**
+4.  **E) ZipInputStream 符号链接无法逃逸**：**错**。`ZipInputStream` **不解析 symlink**，但 `ZipFile`/`ZipEntry` 会保留 `isDirectory()` 等元数据。若你用 `Files.copy` 或 `FileOutputStream` 写入 `entry.getName()`，**路径穿越 (`../../etc/passwd`) 依然生效**，跟是不是 symlink 无关。**必须：`canonicalPath` 校验 + `normalize()` + `startsWith(destDir)`。**
+5.  **F) safeRel `a/../../` 绕过**：**错**。若实现是 `path.split("/")` 遍历段，**`a/../../` 分段为 `["a", "..", ".."]`，第三段 `..` 会让指针跳出根目录**。你的“任何 `..` 段拒绝”会误杀合法相对路径（如 `../model.bin` 在解压上下文里合法）。**正确做法：`Paths.get(base).resolve(rel).normalize().toAbsolutePath().startsWith(baseAbs)`。**
+6.  **I) 多音字 105MB 堆 OOM**：**错**。`mmap` / `ByteBuffer.allocateDirect` 走 **Native 内存**，不计入 Java Heap，**不受 `largeHeap` 512MB 限制**，受限于进程 RSS 总上限（通常 4-8GB）。但你若用 `ByteBuffer.wrap(byte[])` 或 `Files.readAllBytes()` 才进堆。**确认你用 `FileChannel.map` 或 `allocateDirect`；若是堆读，必 OOM。**
+7.  **K) PROCESS_TEXT 只在可编辑文字**：**错**。`PROCESS_TEXT` 意图由 **文本选择工具栏** 发起，`EditText`、`WebView`、只读 `TextView` (API 23+ `textIsSelectable`)、Chrome 选区**均触发**。你过滤掉只读场景是**功能缺失**。
+8.  **L) 按键过滤只看 flag 不看事件类型**：**错**。`KeyEvent` 无 `FLAG_FROM_SYSTEM` 区分“物理键盘”vs“软键盘模拟”。**必须结合 `event.getSource() & InputDevice.SOURCE_KEYBOARD` 且 `event.getDeviceId() != -1` 判断物理键盘**，否则会吞掉系统导航键或模拟器注入键。
+
+**采纳得不对（隐患未消）：**
+
+9.  **③ AudioTrack `minBuf<=0` 兜底**：`getMinBufferSize` 返回 `ERROR_BAD_VALUE` (-2) 或 `ERROR` (-1) 时，**直接 `new AudioTrack` 会抛 `IllegalArgumentException`**。兜底值必须 **`max(minBuf, DEFAULT_BUF)`**，且 `AudioTrack` 构造放 `try-catch` 回退 `MODE_STREAM`。
+10. **⑩ Zip 进度每 20MB**：小文件（<20MB）进度永远 0 直到结束，**UI 假死感强**。改为：**按文件数进度 + 字节进度双轨**，或 `max(1%, bytes/total)` 刷新。
+11. **⑪ 硬链接 `Os.link` 回落复制**：`Os.link` 抛 `ErrnoException (EXDEV)` 跨分区失败，**catch 后复制会阻塞 UI 线程**（你在后台线程则可）。**确认在 IO 线程执行**，且复制用 `FileChannel.transferTo` 零拷贝。
+12. **⑨ 选区缓存 2 分钟**：`typeViewTextSelectionChanged` 在**滑动选区时高频回调**（每帧），直接存字符串会 **GC 抖动**。**改为：仅在 `ACTION_UP` / 选区稳定 500ms 后缓存，弱引用 `CharSequence`，限长 5000 字。**
+
+**同意（不再赘述）：** ①②④⑤⑥⑦⑧⑩(上限/缓冲/原子装)⑪(指纹/预检/SAF/builtins锁)。
+
+**一句话总结**：A/B/C/E/F/I/K/L 是**必改的崩溃/安全/功能缺失**，其余细节在后台线程跑通即可。

@@ -1,0 +1,13 @@
+===== nvidia/nemotron-3-ultra-550b-a55b 3785
+### 严重程度编号审查
+
+#### 1. 【致命】硬链接跨分区/文件系统必崩，且无原子性保证
+**位置**：`VoiceLibrary.installFrom` 第 130 行 `android.system.Os.link(tw.absolutePath, out.absolutePath)`
+**原因**：
+- Android 10+ 分区存储：`importDir` (data/user/0/...) 与 `externalDir` (sdcard/Android/data/...) 常在**不同文件系统**（ext4 vs f2fs/exFAT/FUSE），`Os.link` 抛 `
+===== stepfun-ai/step-5-preview 1774
+1. **并发不同步，状态错乱（严重）**  
+`builtins()`/`editionName` 无锁保护，`catalog()`、`refresh()`、`delete()` 可被多线程（设置页、导入服务、TTS 引擎）同时调用，导致 assets 重复解析、扫描到半删状态。**改法**：`builtins()` 也纳入 `synchronized(this)`，或整体改用 `ReentrantLock` + 明确调用线程；`delete()` 同样加锁。
+
+2. **硬链接前逐文件全量 SHA-256，低端机卡死（严重）**  
+`installFrom` 对每个 ≥1MB 文件做 `

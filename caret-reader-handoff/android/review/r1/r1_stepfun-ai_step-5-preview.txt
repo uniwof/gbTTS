@@ -1,0 +1,23 @@
+按严重程度排序（编号即优先级）：
+
+**1. 无障碍节点泄漏（API<33 必崩）**
+- 位置：`TextGrab.grab` / `findSelection`
+- 为什么：`rootInActiveWindow`、`svc.windows`、`getChild` 返回的 `AccessibilityNodeInfo` 在 API 33 以下必须手动 `recycle()`。代码只遍历不回收，节点池迅速耗尽，后续 `findAccessibilityNodeInfosByText` 全部返回 null，表现为“突然取不到文字”。
+- 怎么改：BFS 队列中 poll 出的节点、`roots` 列表、`focus`/`a11y` 节点在 `finally` 中统一 `recycle()`（API≥33 可跳过，用 `Build.VERSION.SDK_INT` 判断）。
+
+**2. 主线程切分大文本 → ANR**
+- 位置：`Reader.start`（被 `ReadTextActivity.onCreate`、`CaretAccessibilityService.mainAction` 直接调用）
+- 为什么：`TextSplitter.split(clean, ...)` 对 10 万字符是重操作，放在 Activity/无障碍主线程会直接 ANR（Android 6 上 5 秒即崩）。
+- 怎么改：`start()` 内部立即起后台线程做 `split`，主线程只返回“正在准备…”。
+
+**3. AudioTrack 播完判断回绕 Bug**
+- 位置：`Reader.run` 尾部 `while` 循环
+- 为什么：`playbackHeadPosition` 是 32 位回绕计数器，`written` 是 long。当 `written` 超过 2^31 后，`head` 回绕到小值，`head >= written` 永远 false，线程死循环卡在 finally 前，通知栏不消失。
+- 怎么改：用 `(head.toLong() and 0xffffffffL) - (written and 0xffffffffL)` 做差值，或改用 `AudioTrack.getPlaybackHeadPosition` 配合 `setNotificationMarkerPosition`。
+
+**4. Android 12+ 后台启动前台服务被禁**
+- 位置：`ReaderService.ensureRunning`
+- 为什么：API 31+ 从后台（无障碍/分享/通知）`startForegroundService` 会抛 `ForegroundServiceStartNotAllowedException`。你 catch 后“照样朗读”，但进程失去前台保活，低内存机型立刻被杀，锁屏必死。
+- 怎么改：启动前用 `ActivityManager.getRunningAppProcesses()` 或 `Process.getThreadPriority` 判断前后台；后台时先 `startService` + 延迟重试，或要求用户把 app 加入电池优化白名单（引导页明说）。
+
+**5. Zip 导入符号链接/Zip Slap**

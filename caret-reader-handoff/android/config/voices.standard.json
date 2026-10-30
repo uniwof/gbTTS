@@ -1,0 +1,23 @@
+{
+  "edition": "标准版",
+  "models": [
+    { "id": "melo", "type": "vits", "dir": "models/vits-melo-tts-zh_en",
+      "model": "model.onnx", "tokens": "tokens.txt", "lexicon": "lexicon.txt",
+      "ruleFsts": ["date.fst", "phone.fst", "number.fst", "new_heteronym.fst"] },
+    { "id": "zhll", "type": "vits", "dir": "models/sherpa-onnx-vits-zh-ll",
+      "model": "model.onnx", "tokens": "tokens.txt", "lexicon": "lexicon.txt",
+      "ruleFsts": ["date.fst", "phone.fst", "number.fst", "new_heteronym.fst"] },
+    { "id": "fanchen", "type": "vits", "dir": "models/vits-zh-hf-fanchen-C",
+      "model": "vits-zh-hf-fanchen-C.onnx", "tokens": "tokens.txt", "lexicon": "lexicon.txt",
+      "ruleFsts": ["date.fst", "phone.fst", "number.fst", "new_heteronym.fst"] }
+  ],
+  "voices": [
+    { "id": "melo-0",     "name": "女声 1 · 自然 (Melo)",          "model": "melo",    "sid": 0 },
+    { "id": "zhll-2",     "name": "女声 2 · 柔和 (zh-ll #2)",      "model": "zhll",    "sid": 2 },
+    { "id": "zhll-3",     "name": "女声 3 · 低沉 (zh-ll #3)",      "model": "zhll",    "sid": 3 },
+    { "id": "zhll-0",     "name": "女声 4 · 清亮 (zh-ll #0)",      "model": "zhll",    "sid": 0 },
+    { "id": "fanchen-29", "name": "女声 5 · 温婉 (fanchen-C #29)", "model": "fanchen", "sid": 29, "gain": 2.5 },
+    { "id": "fanchen-7",  "name": "女声 6 · 沉静 (fanchen-C #7)",  "model": "fanchen", "sid": 7 },
+    { "id": "fanchen-24", "name": "女声 7 · 知性 (fanchen-C #24)", "model": "fanchen", "sid": 24 }
+  ]
+}

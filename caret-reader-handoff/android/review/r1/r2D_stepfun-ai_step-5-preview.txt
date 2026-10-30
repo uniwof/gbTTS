@@ -1,0 +1,29 @@
+1. **并发不同步，状态错乱（严重）**  
+`builtins()`/`editionName` 无锁保护，`catalog()`、`refresh()`、`delete()` 可被多线程（设置页、导入服务、TTS 引擎）同时调用，导致 assets 重复解析、扫描到半删状态。**改法**：`builtins()` 也纳入 `synchronized(this)`，或整体改用 `ReentrantLock` + 明确调用线程；`delete()` 同样加锁。
+
+2. **硬链接前逐文件全量 SHA-256，低端机卡死（严重）**  
+`installFrom` 对每个 ≥1MB 文件做 `sameContent()` 全量哈希，120MB 模型在 2 核机上耗时数十秒，阻塞导入且无进度反馈。**改法**：`modelKey` 已含采样哈希与大小，直接以 `modelKey` 相等 + 文件大小相等作为硬链接依据；仅在文件 <1MB 时全量校验。
+
+3. **`sameBuiltin` 分支静默丢失 ruleFsts/puaMap（严重）**  
+与内置同模型时只复制 `voice.json` 和试听，若导入包附带 `rulefsts`、`puamap`（多音字/规则）会被丢弃，功能与 Windows 不一致。**改法**：除模型外，将包内所有非模型文件（fsts、puaMap、词典等）一并复制到目标目录。
+
+4. **`externalDir` 在 Android 11+ 基本失效（严重）**  
+`Android/data/<包名>` 自 API 30 起被 Scoped Storage 封锁，普通用户无法通过数据线/MTP 直接拷贝。**改法**：删除该"数据线导入"路径，仅保留 SAF 导入；如确需支持，改用 `ACTION_OPEN_DOCUMENT_TREE` 授权目录。
+
+5. **ZIP 条目未拒绝 Symlink/特殊 mode（高）**  
+`importZip` 仅校验路径名，未检查 Unix mode。若后续切换 `ZipFile` 或系统解压，Symlink 可致目录逃逸。**改法**：解压前显式拒绝 `(e.unicodeExtraFields != null || (e.javaAttr and 0xF000) == 0xA000)` 等 Symlink/Device 条目。
+
+6. **`installFrom` 循环内 `refresh()` 造成重复全盘扫描（高）**  
+每装入一个包就 `refresh(ctx)` 一次，导入 N 个包触发 N+1 次全目录遍历 + SHA，低端机极慢。**改法**：循环内仅更新内存列表，全部装完后再 `refresh()` 一次。
+
+7. **`uniqueDir` TOCTOU + `mkdirs()` 未检查返回值（高）**  
+并发导入时两个线程可能选中同一目标目录；`dest.mkdirs()` 失败仍继续写入，导致覆盖或异常。**改法**：`dest.mkdirs()` 后必须 `isDirectory` 校验；失败则换名重试或报错。
+
+8. **`importTree` 大小检查滞后且流失败静默（中）**  
+单文件超 3GB 在写完后才抛异常；`openInputStream` 返回 null 时静默跳过，用户得到"成功"但文件缺失。**改法**：复制前用 `DocumentsContract.Document.COLUMN_SIZE` 预检；null 流时记录错误并中断。
+
+9. **`stripComments` 未闭合块注释会截断 JSON（中）**  
+`/*` 未闭合时直接丢弃剩余内容，导致解析失败但无明确原因。**改法**：遇到未闭合注释抛 `IllegalArgumentException("voice.json 注释未闭合")`。
+
+10. **空间预检对 `sameBuiltin` 误报（中）**  
+`need` 按整个包（含模型）计算，但内置分支只存 manifest+试听，低存储手机被错误拒绝。**改法**：先判定 `sameBuiltin`，再按实际写入量计算所需空间。

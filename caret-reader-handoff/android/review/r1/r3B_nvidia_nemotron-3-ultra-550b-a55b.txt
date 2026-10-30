@@ -1,0 +1,64 @@
+### 严重（阻塞/崩溃/数据竞争）
+
+1. **Reader.run:30 `Engine.use` 持有全局锁时在 `synchronized(lock)` 内阻塞**  
+   `Engine.use` 内部对引擎单例加锁（推测），而 `lock` 又被 `toggle/stop` 频繁争用。合成线程在 `lock.wait()` 或 `track.write()` 时持有 `lock`，导致 UI 线程调用 `toggle()` 卡死 → ANR。  
+   **改法**：把 `synchronized(lock)` 缩小到仅保护 `track/pausedFlag/state` 读写；`Engine.use` 移出锁外，合成前再 `synchronized(lock){ if(stopped) return; track=t; … }`。
+
+2. **Reader.run:58 `track.playbackHeadPosition` 与 `written` 比较溢出**  
+   `playbackHeadPosition` 返回 `int`（帧数），`written` 是 `Long`（样本数/2）。长朗读 > 24h 会绕回，但更早触发：`head.toLong() and 0xffffffffL` 只取低 32 位，`written` 单调增，比较永远为真 → 死循环卡住 `finally`，服务不死、通知不消失。  
+   **改法**：统一用帧数 `writtenFrames`（`written/2`），对比时 `(head - writtenFrames) & 0x7FFFFFFF < threshold`；或直接 `track.getTimestamp(AudioTrack.TIMESTAMP_MODE_FRAME)` 取硬件时钟。
+
+3. **ReaderService.onStartCommand:28 `startForeground` 后立即 `stopSelf` 竞争**  
+   `Reader.isActive()` 读的是 `@Volatile state`，但 `Reader.start` 里 `set(State.READING)` 与 `ReaderService.ensureRunning` 启动服务是两个异步动作。服务 `onStartCommand` 可能在 `state` 还未变更前执行，判定 `!isActive()` → `stopSelf()`，导致前台服务刚起就死，锁屏后进程被杀。  
+   **改法**：`ensureRunning` 传入 `myGen`，服务在 `onStartCommand` 里 `while(Reader.gen != myGen && Reader.state==IDLE) Thread.sleep(20)` 等待，或改用 `startForeground` 返回后再检查 `Reader.isActive()`。
+
+4. **Reader.toggle:83 `pausedFlag` 与 `track.pause/play` 顺序反**  
+   先改标志再操作 `track`，中间若被 `run` 线程 `wait(200)` 醒来检查 `pausedFlag` 为真 → 继续 `wait`，但 `track` 已 `play()` → 音频缓冲区持续消费，`write` 端阻塞，最终 `track` 下溢静音。  
+   **改法**：先 `track.pause()` 再 `pausedFlag=true`；恢复时先 `pausedFlag=false; lock.notifyAll()` 再 `track.play()`。
+
+---
+
+### 高（资源泄漏/逻辑漏洞）
+
+5. **Reader.run:72 `PcmOut` lambda 捕获 `t` 引用，`stop()` 时 `track.flush()` 后仍可能回调写入已释放的 `AudioTrack`**  
+   `stop()` 只 `track?.flush()`，不置空 `out` 的回调；合成线程仍在 `synth.render` 内循环写入 → `IllegalStateException` 或 native crash。  
+   **改法**：`stopGen` 置位后，`run` 循环顶层 `if(stopped()) return`；`PcmOut` 回调首行检查 `stopped()` 并返回 `false` 终止渲染（已有但需确认 `SherpaSynth.synth` 能响应 `stopped` 回调）。
+
+6. **ReaderService.update:45 `NotificationManager.notify` 在 `onStartCommand` 同步调用**  
+   Android 12+ 后台启动前台服务受限，`startForeground` 可能抛 `ForegroundServiceStartNotAllowedException`，`catch` 后仍 `notify` → 崩溃或通知不显示。  
+   **改法**：`ensureRunning` 捕获异常后直接返回；`onStartCommand` 里 `if (!Reader.isActive()) { stopSelf(); return START_NOT_STICKY }` 放在 `try-startForeground` 之后。
+
+7. **SherpaSynth.engineText:18 `PolyphoneFrontend.shared(5000)` 静态单例首次调用在合成线程**  
+   初始化加载词典/模型可能 200–500 ms，阻塞合成线程导致首句延迟大；若 OOM 直接抛出未捕获 → 合成线程死、播放器卡死。  
+   **改法**：`Reader.start` 阶段（`State.LOADING`）预热 `PolyphoneFrontend.shared()`，失败则降级不使用前端。
+
+---
+
+### 中（体验/规范）
+
+8. **Reader.run:65 `Thread.sleep(50)` 忙等播放结束**  
+   低端机 2 核上 50 ms 唤醒抢 CPU，且 `playbackHeadPosition` 精度差。  
+   **改法**：`AudioTrack.setPlaybackPositionUpdateListener` 在 `onPeriodicNotification` 里 `lock.notifyAll()`，主循环 `lock.wait()`。
+
+9. **Reader.start:45 `TextGrab.clean(text).take(100_000)` 硬截断**  
+   10 万字符 ≈ 30 分钟语音，低端机内存压力大；且截断不提示用户。  
+   **改法**：`Prefs` 加 `maxChars`，超限时 `notice("文字过长，仅朗读前 ${max} 字")`。
+
+10. **ReaderService.build:70 `android.R.drawable.ic_lock_silent_mode_off` 系统图标**  
+    不同 ROM/深色模式下不可见或语义错误。  
+    **改法**：自带 `ic_notification_tts`（白色 24dp），`setColorized(true)` 适配深色。
+
+---
+
+### 低/推测
+
+11. **Reader.run:38 `AudioTrack` buffer `maxOf(minBuf, sr*2)` 仅 1 秒**  
+    低端机 `write` 阻塞概率高，建议 `sr*4`（2 秒）或 `minBuf*4`。
+
+12. **Reader.toggle:80 `State.LOADING` 时 `pausedFlag` 翻转但无持久化**  
+    若加载完成前进程被杀，重启后丢失“加载完暂停”意图。  
+    **改法**：`Prefs` 存 `pendingPauseGen`，`run` 启动时检查。
+
+13. **SherpaSynth:12 `loggedFirst` 非线程安全**  
+    多线程合成（推测 `Engine.use` 允许并发）会重复打印或漏打。  
+    **改法**：`AtomicBoolean` 或移至 `Reader.start` 预热阶段打印。

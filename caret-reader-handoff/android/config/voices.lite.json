@@ -1,0 +1,12 @@
+{
+  "edition": "轻量版",
+  "models": [
+    { "id": "matcha", "type": "matcha", "dir": "models/matcha-icefall-zh-baker",
+      "model": "model-steps-3.onnx", "vocoder": "vocos-22khz-univ.onnx",
+      "tokens": "tokens.txt", "lexicon": "lexicon.txt",
+      "ruleFsts": ["date.fst", "phone.fst", "number.fst"] }
+  ],
+  "voices": [
+    { "id": "matcha-0", "name": "女声 · 标准 (Matcha)", "model": "matcha", "sid": 0 }
+  ]
+}

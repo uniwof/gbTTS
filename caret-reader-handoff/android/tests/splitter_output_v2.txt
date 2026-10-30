@@ -1,0 +1,86 @@
+IN : 圆周率是3.14。
+   [圆周率是3.14。] +0.5  -> engine: [圆周率是3.14。]  len=9
+IN : 共1,000元
+   [共1,000元] +0  -> engine: [共1,000元]  len=7
+IN : 10:30开会
+   [10:30开会] +0  -> engine: [10:30开会]  len=7
+IN : 10：30开会
+   [10：30开会] +0  -> engine: [10：30开会]  len=7
+IN : 版本v1.2.3发布
+   [版本v1.2.3发布] +0  -> engine: [版本v1.2.3发布]  len=10
+IN : 3．14
+   [3．14] +0  -> engine: [3．14]  len=4
+IN : １，０００元
+   [１，０００元] +0  -> engine: [１，０００元]  len=6
+IN : 数值.5很小
+   [数值.5很小] +0  -> engine: [数值.5很小]  len=6
+IN : -3.5度
+   [-3.5度] +0  -> engine: [-3.5度]  len=5
+IN : 他说……然后
+   [他说……] +0.5  -> engine: [他说……]  len=4
+   [然后] +0  -> engine: [然后]  len=2
+IN : 等等...
+   [等等...] +0.5  -> engine: [等等...]  len=5
+IN : ……开头
+   [开头] +0  -> engine: [开头]  len=2
+IN : 。。。
+IN : 他说：“你好。”然后走了。
+   [他说：] +0.25  -> engine: [他说，]  len=3
+   [“你好。”] +0.5  -> engine: [“你好。”]  len=5
+   [然后走了。] +0.5  -> engine: [然后走了。]  len=5
+IN : 「好！」
+   [「好！」] +0.5  -> engine: [「好！」]  len=4
+IN : （注：见上文。）
+   [（注：] +0.25  -> engine: [（注，]  len=3
+   [见上文。）] +0.5  -> engine: [见上文。）]  len=5
+IN : He said "hi." Then left.
+   [He said "hi."] +0.5  -> engine: [He said "hi."]  len=13
+   [Then left.] +0.5  -> engine: [Then left.]  len=10
+IN : 我用Mr. Smith的电脑
+   [我用Mr. Smith的电脑] +0  -> engine: [我用Mr. Smith的电脑]  len=14
+IN : e.g. 例如
+   [e.g. 例如] +0  -> engine: [e.g. 例如]  len=7
+IN : U.S.A.很大
+   [U.S.A.很大] +0  -> engine: [U.S.A.很大]  len=8
+IN : Dr.Wang来了
+   [Dr.Wang来了] +0  -> engine: [Dr.Wang来了]  len=9
+IN : OK!好的
+   [OK!] +0.5  -> engine: [OK!]  len=3
+   [好的] +0  -> engine: [好的]  len=2
+IN : 访问https://example.com/a.b?x=1,2吧
+   [访问https://example.com/a.b?x=1,2吧] +0  -> engine: [访问https://example.com/a.b?x=1,2吧]  len=32
+IN : 他——走了
+   [他——] +0.15  -> engine: [他——]  len=3
+   [走了] +0  -> engine: [走了]  len=2
+IN : 马克·吐温
+   [马克·吐温] +0  -> engine: [马克·吐温]  len=5
+IN : 1~3天
+   [1~3天] +0  -> engine: [1~3天]  len=4
+IN : 第一行\r\n\r\n第二行
+   [第一行] +0.5  -> engine: [第一行]  len=3
+   [第二行] +0  -> engine: [第二行]  len=3
+IN : ”开头的引号
+   [”开头的引号] +0  -> engine: [”开头的引号]  len=6
+IN : ，。！
+IN : 价格是3.
+   [价格是3.] +0.5  -> engine: [价格是3.]  len=5
+IN : 他说:"好"
+   [他说:] +0.25  -> engine: [他说,]  len=3
+   ["好"] +0  -> engine: ["好"]  len=3
+IN : 中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中ab文文文文文文文文文文文文文文文文文文文文
+   [中中中中中中中中中中中中中中中中中中中中] +0  -> engine: [中中中中中中中中中中中中中中中中中中中中]  len=20
+   [中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中] +0  -> engine: [中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中]  len=36
+   [中中中ab文文文文文文文文文文文文文文文文文文文文] +0  -> engine: [中中中ab文文文文文文文文文文文文文文文文文文文文]  len=25
+IN : 中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中😀文文文文文
+   [中中中中中中中中中中中中中中中中中中中中] +0  -> engine: [中中中中中中中中中中中中中中中中中中中中]  len=20
+   [中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中] +0  -> engine: [中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中]  len=36
+   [中中中😀文文文文文] +0  -> engine: [中中中😀文文文文文]  len=10
+IN : 中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中12345文文文文文
+   [中中中中中中中中中中中中中中中中中中中中] +0  -> engine: [中中中中中中中中中中中中中中中中中中中中]  len=20
+   [中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中] +0  -> engine: [中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中]  len=36
+   [中中中12345文文文文文] +0  -> engine: [中中中12345文文文文文]  len=13
+IN : This is a very long English sentence without any punctuation at all that goes on and on and on forever
+   [This is a very long] +0  -> engine: [This is a very long]  len=19
+   [English sentence without any] +0  -> engine: [English sentence without any]  len=28
+   [punctuation at all that goes on and] +0  -> engine: [punctuation at all that goes on and]  len=35
+   [on and on forever] +0  -> engine: [on and on forever]  len=17
