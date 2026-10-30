@@ -1,0 +1,52 @@
+# 光标朗读 gbTTS：Windows 构建 + 全部自动测试 + --selftest 自检 + 便携 zip（P0）
+name: windows-build
+
+on:
+  push:
+    branches: [main, dev, 'feat/**']
+    paths: ['caret-reader-handoff/windows/**', '.github/workflows/windows.yml']
+  pull_request:
+    branches: [dev, main]
+    paths: ['caret-reader-handoff/windows/**', '.github/workflows/windows.yml']
+  workflow_dispatch:
+
+concurrency:
+  group: windows-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: windows-latest
+    timeout-minutes: 40
+    defaults:
+      run:
+        shell: pwsh
+        working-directory: caret-reader-handoff/windows
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: 缓存音色模型（清朗 chaowen）
+        uses: actions/cache@v4
+        with:
+          path: caret-reader-handoff/windows/models
+          key: models-chaowen-medium-v1
+      - name: 构建 + 测试 + 自检 + 打包
+        run: ./build.ps1 -WithVoice
+      - name: 上传测试结果与自检日志
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results
+          path: caret-reader-handoff/windows/TestResults
+          if-no-files-found: ignore
+      - name: 上传便携版 zip
+        uses: actions/upload-artifact@v4
+        with:
+          name: gbTTS-portable-win10x64
+          path: caret-reader-handoff/release/**/*.zip
+          compression-level: 0

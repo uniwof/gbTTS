@@ -4,9 +4,9 @@
   输出 lexicon = 原词典原样 + 每个带调拼音一行（U+E000 起的私用区字符 → 该拼音在这个模型里的音素写法）
   pua_map.txt  = 一行“拼音 字符”，程序读它把定好音的汉字换成对应字符。
 算法与实验版 work/tts/clarity/inject.py + evalpy.py 相同（已在 Melo / zh-ll / fanchen / Matcha / Piper 上验证）。"""
-import sys
+import os, sys
 from collections import Counter, defaultdict
-sys.path.insert(0, '/workspace/work/tts/v2/pylib')
+sys.path.insert(0, os.environ.get('GBTTS_PYLIB', '/workspace/work/tts/v2/pylib'))  # 没有这个目录时用 pip 装的 pypinyin
 from pypinyin import pinyin_dict
 from pypinyin.contrib.tone_convert import to_tone3
 ZY = "ˉˊˇˋ˙"
