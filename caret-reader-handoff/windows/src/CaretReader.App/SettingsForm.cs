@@ -65,6 +65,8 @@ internal sealed class SettingsForm : Form
         Row("朗读 / 暂停 / 继续", _hotkey, S(152));
         Row("停止", _stopHotkey, S(152));
         Hint("点击输入框，直接按下新的组合键。字母键请用两个修饰键，如 Ctrl+Alt+R");
+        Hint("固定快捷键：Ctrl+Alt+PageUp 上一句 · Ctrl+Alt+PageDown 下一句 · Ctrl+Alt+C 朗读剪贴板");
+        Hint("小人：单击朗读/暂停/继续；悬停出工具条；右键更多");
         // 快捷键有问题时显示在这里（黑色小字，不弹窗）
         _hotkeyError.Font = Ink.SmallFont;
         _hotkeyError.ForeColor = Ink.InkBlack;
