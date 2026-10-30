@@ -4,6 +4,7 @@ using System.Text.RegularExpressions;
 namespace CaretReader.Core.Text;
 
 /// <summary>普通英文单词在“不支持英文的音色”下怎么读（文档 5.5，默认逐个字母读）。</summary>
+[System.Text.Json.Serialization.JsonConverter(typeof(System.Text.Json.Serialization.JsonStringEnumConverter))]
 public enum EnglishPolicy { Spell, Skip, SayEnglish }
 
 /// <summary>

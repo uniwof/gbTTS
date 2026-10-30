@@ -5,6 +5,7 @@ using System.Text.RegularExpressions;
 namespace CaretReader.Core.Text;
 
 /// <summary>emoji 怎么读：默认不读；可改为读 symbols.tsv 里“表情”那一行的词。</summary>
+[System.Text.Json.Serialization.JsonConverter(typeof(System.Text.Json.Serialization.JsonStringEnumConverter))]
 public enum EmojiMode { Skip, Say }
 
 /// <summary>

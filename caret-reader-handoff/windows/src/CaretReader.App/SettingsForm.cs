@@ -99,8 +99,17 @@ internal sealed class SettingsForm : Form
         about.Click += (_, _) => { using var f = new AboutForm(); f.ShowDialog(this); };
         Controls.Add(about);
         _y += S(36);
-        Hint("多音字读错？可以用记事本编辑程序文件夹里的");
-        Hint("「用户自定义词库.txt」，保存后重启光标朗读生效");
+        // P1：读法规则（含测试框）与标点停顿表
+        var rulesBtn = new InkButton { Text = "读法与标点…", Bounds = new Rectangle(S(24), _y, S(152), S(28)) };
+        rulesBtn.Click += (_, _) =>
+        {
+            using var f = new TextRulesForm(Result.Text, Path.Combine(AppContext.BaseDirectory, "rules"),
+                CaretReader.Core.Settings.TextLayerSettings.UserDataDir(settingsPath));
+            f.ShowDialog(this);
+        };
+        Controls.Add(rulesBtn);
+        _y += S(36);
+        Hint("读错的字、网络用语、标点停顿长短，都在这里改");
         _y += S(8);
 
         // ---------- 底部按钮 ----------
