@@ -160,9 +160,10 @@ public sealed class TtsEngine : IDisposable
     /// <summary>v0.5：多音字前端（有拼音表、前端已加载时）把汉字换成指定读音；任何问题都退回原文。</summary>
     private string ForEngine(string text)
     {
-        if (_pua == null || !UseFrontend) return text;
+        // P1：没有拼音表 / 前端未加载时，去掉文本层加的拼音注释，只读原文
+        if (_pua == null || !UseFrontend) return Text.PinyinAnnotation.Strip(text);
         var f = PolyphoneFrontend.Shared();
-        if (f == null) return text;
+        if (f == null) return Text.PinyinAnnotation.Strip(text);
         try
         {
             string r = f.ToEngineText(text, _pua);
@@ -173,7 +174,7 @@ public sealed class TtsEngine : IDisposable
             }
             return r;
         }
-        catch (Exception ex) { Log.Write("多音字前端出错，这一句按原文朗读：" + ex.Message); return text; }
+        catch (Exception ex) { Log.Write("多音字前端出错，这一句按原文朗读：" + ex.Message); return Text.PinyinAnnotation.Strip(text); }
     }
 
     /// <summary>释放当前模型。会等正在进行的合成结束后再释放。</summary>

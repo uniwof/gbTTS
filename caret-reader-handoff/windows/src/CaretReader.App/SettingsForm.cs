@@ -81,12 +81,7 @@ internal sealed class SettingsForm : Form
         Row("线程数", _threads);
         Hint("默认 2。电脑较好可调到 4；修改后会重新加载模型");
 
-        Section("标点停顿（秒）");
-        Row("逗号  ，、,", _pComma);
-        Row("句号  。！？.!?", _pPeriod);
-        Row("分号  ；;", _pSemi);
-        Row("冒号  ：:", _pColon);
-        Row("换行", _pNewline);
+        // P1：标点停顿改由标点表决定（「读法与标点…」→ 节奏（标点）页），旧的五档不再显示
 
         Section("窗口");
         _topMost.Bounds = new Rectangle(S(24), _y, S(200), S(24));
