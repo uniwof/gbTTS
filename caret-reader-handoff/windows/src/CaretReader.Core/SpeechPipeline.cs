@@ -80,6 +80,39 @@ public sealed class ClauseQueue
     }
 }
 
+/// <summary>
+/// 第 3 轮：记住“现在播放到第几句”，给上一句 / 下一句、朗读中换音色续读用。
+/// 做法：每送一句进声卡就记下“累计写入秒数”，播放位置 = 累计写入 − 声卡里还没播的秒数。
+/// 线程安全；只读，不影响朗读本身。
+/// </summary>
+public sealed class PlaybackTracker
+{
+    private readonly object _gate = new();
+    private readonly List<(int Index, double End)> _ends = new();
+    private double _written;
+    private IAudioSink? _sink;
+
+    public void Attach(IAudioSink sink) { lock (_gate) { _sink = sink; _ends.Clear(); _written = 0; } }
+    public void Written(int index, double seconds)
+    {
+        lock (_gate) { _written += seconds; _ends.Add((index, _written)); }
+    }
+
+    /// <summary>此刻正在播放的小句序号；一句都还没播出时返回 fallback。</summary>
+    public int CurrentIndex(int fallback = 0)
+    {
+        lock (_gate)
+        {
+            if (_ends.Count == 0) return fallback;
+            double buffered = 0;
+            try { buffered = _sink?.BufferedSeconds ?? 0; } catch { }
+            double played = Math.Max(0, _written - buffered);
+            foreach (var e in _ends) if (e.End > played + 0.02) return e.Index;
+            return _ends[^1].Index;
+        }
+    }
+}
+
 /// <summary>一次朗读的统计数据（写日志、测试报告用）。</summary>
 public sealed class PipelineStats
 {
@@ -149,10 +182,10 @@ public static class SpeechPipeline
     public static Task<PipelineStats> RunAsync(
         ClauseQueue clauses, TtsEngine engine, int sid, float speed,
         IAudioSink sink, CancellationToken token, Action<int, Clause>? onClause = null, long hotkeyTimestamp = 0,
-        float gain = 1f)
+        float gain = 1f, int startIndex = 0, PlaybackTracker? tracker = null)
     {
         return Task.Factory.StartNew(
-            () => Run(clauses, engine, sid, speed, sink, token, onClause, hotkeyTimestamp, gain),
+            () => Run(clauses, engine, sid, speed, sink, token, onClause, hotkeyTimestamp, gain, startIndex, tracker),
             token, TaskCreationOptions.LongRunning, TaskScheduler.Default)
             // 如果在开始前就被取消了，也返回一个统计对象而不是抛异常
             .ContinueWith(t => t.IsCanceled ? new PipelineStats { Cancelled = true }
@@ -194,7 +227,8 @@ public static class SpeechPipeline
 
     private static PipelineStats Run(
         ClauseQueue clauses, TtsEngine engine, int sid, float speed,
-        IAudioSink sink, CancellationToken token, Action<int, Clause>? onClause, long hotkeyTimestamp, float gain)
+        IAudioSink sink, CancellationToken token, Action<int, Clause>? onClause, long hotkeyTimestamp, float gain,
+        int startIndex = 0, PlaybackTracker? tracker = null)
     {
         var stats = new PipelineStats();
         var clock = Stopwatch.StartNew();
@@ -222,19 +256,25 @@ public static class SpeechPipeline
         {
             if (sr <= 0) throw new InvalidOperationException("模型还没有加载。");
             sink.Begin(sr);
-            List<float[]>? pending = new();   // 启动缓冲（见 MaxStartupWaitSeconds）
+            tracker?.Attach(sink);
+            List<float[]>? pending = new();
+            var pendingIdx = new List<int>();   // 启动缓冲（见 MaxStartupWaitSeconds）
             double pendingSeconds = 0;
             int charsSoFar = 0;
             object pendingGate = new();
             void FlushPending()   // 调用时必须持有 pendingGate
             {
                 if (pending == null || token.IsCancellationRequested) return;
-                foreach (var p in pending) sink.Write(p);
+                for (int k = 0; k < pending.Count; k++)
+                {
+                    sink.Write(pending[k]);
+                    tracker?.Written(pendingIdx[k], (double)pending[k].Length / sr);
+                }
                 pending = null;
                 stats.FirstAudioLatencySeconds = offset + clock.Elapsed.TotalSeconds;
             }
 
-            for (int i = 0; ; i++)
+            for (int i = startIndex; ; i++)
             {
                 // 播放缓冲里已经攒够了（或者用户按了“暂停”，声卡不再消耗缓冲）→ 等一等，别合成太多占内存
                 while (sink.BufferedSeconds > MaxAheadSeconds && !token.IsCancellationRequested)
@@ -282,6 +322,7 @@ public static class SpeechPipeline
                     {
                         // 还在“启动缓冲”阶段：先攒着
                         pending.Add(chunk);
+                        pendingIdx.Add(i);
                         pendingSeconds += (double)chunk.Length / sr;
                         var following = clauses.Peek(i + 1, out bool last);
                         double perChar = stats.SpeechSeconds / Math.Max(1, charsSoFar += clause.Text.Length);
@@ -300,6 +341,7 @@ public static class SpeechPipeline
                     else
                     {
                         sink.Write(chunk);
+                        tracker?.Written(i, (double)chunk.Length / sr);
                     }
                 }
                 onClause?.Invoke(i, clause);

@@ -36,7 +36,7 @@ internal sealed class HotkeyWindow : NativeWindow, IDisposable
 
     public void Dispose()
     {
-        try { Hotkey.Unregister(Handle, Hotkey.MainId); Hotkey.Unregister(Handle, Hotkey.StopId); } catch { }
+        try { Hotkey.Unregister(Handle, Hotkey.MainId); Hotkey.Unregister(Handle, Hotkey.StopId); Hotkey.Unregister(Handle, Hotkey.PrevId); Hotkey.Unregister(Handle, Hotkey.NextId); Hotkey.Unregister(Handle, Hotkey.ClipId); } catch { }
         DestroyHandle();
     }
 }

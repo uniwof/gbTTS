@@ -51,6 +51,12 @@ internal sealed class MainForm : Form
     private int _readSession;
     private NAudioSink? _sink;
     private bool _pauseRequested;
+    // 第 3 轮：上一句 / 下一句、朗读中换音色续读
+    private ClauseQueue? _queue;                 // 当前这篇文字的所有小句
+    private PlaybackTracker? _track;             // 当前播放到第几句
+    private CancellationTokenSource? _docCts;    // 这篇文字的后台读取（换音色、翻句时不取消）
+    private int? _navIndex;                      // 正在重新开始的小句序号（连按时用）
+    private int _runStart;
 
     private FocusTracker? _tracker;
     private readonly System.Windows.Forms.Timer _anim = new();
@@ -468,6 +474,11 @@ internal sealed class MainForm : Form
         bool canAct = _state is State.Idle or State.Reading or State.Paused or State.Grabbing;
         _menu.Items.Add(Item(act, () => _ = OnMainActionAsync(Stopwatch.GetTimestamp(), CurrentTarget("菜单")), canAct));
         _menu.Items.Add(Item("停止（点小人旁边的 ■）", () => { StopReading(); FlashStatus("已停止"); }, _state is State.Reading or State.Paused or State.Grabbing));
+        bool navOk = _queue != null && _state is State.Reading or State.Paused;
+        _menu.Items.Add(Item("上一句（Ctrl+Alt+PageUp）", () => NavSentence(-1), navOk));
+        _menu.Items.Add(Item("下一句（Ctrl+Alt+PageDown）", () => NavSentence(+1), navOk));
+        _menu.Items.Add(Item("朗读剪贴板（Ctrl+Alt+C）", () => OnClipboardKey(Stopwatch.GetTimestamp()),
+                             _state is State.Idle or State.Reading or State.Paused or State.Grabbing));
         _menu.Items.Add(new ToolStripSeparator());
         string voiceName = (_voiceMenu.SelectedItem as VoicePack)?.Name ?? "（没有音色）";
         _menu.Items.Add(Item($"选择音色 / 试听：{voiceName}", () => BeginInvoke(() => _voiceMenu.ShowAt(new Point(Left, Top))),
@@ -604,6 +615,7 @@ internal sealed class MainForm : Form
 
         CrashGuard.Mark("注册快捷键");
         ApplyHotkeys(_settings.Hotkey, _settings.StopHotkey, showErrors: true);
+        RegisterRound3Hotkeys();
 
         if (_packs.Count == 0)
         {
@@ -648,6 +660,9 @@ internal sealed class MainForm : Form
     private void OnHotkey(int id, long pressedAt)
     {
         if (id == Hotkey.StopId) { Log.Write("停止快捷键"); OnStopKey(); return; }
+        if (id == Hotkey.PrevId) { Log.Write("上一句快捷键"); NavSentence(-1); return; }
+        if (id == Hotkey.NextId) { Log.Write("下一句快捷键"); NavSentence(+1); return; }
+        if (id == Hotkey.ClipId) { Log.Write("朗读剪贴板快捷键"); OnClipboardKey(pressedAt); return; }
         // 快捷键那一刻的前台窗口就是要读的文档（本程序在前台时用最后一个外部窗口）
         var target = CurrentTarget("快捷键");
         Log.Write($"朗读快捷键（状态 {_state}），目标 {target}");
@@ -713,6 +728,22 @@ internal sealed class MainForm : Form
         }
         if (errors.Count > 0 && showErrors) ShowError(string.Join("\n\n", errors));
         return errors.Count == 0;
+    }
+
+    /// <summary>第 3 轮的三个固定快捷键（不要用 Ctrl+Alt+方向键：会触发 Intel 显卡的屏幕旋转）。</summary>
+    private void RegisterRound3Hotkeys()
+    {
+        var bad = new List<string>();
+        void Reg(Hotkey hk, int id, string name)
+        {
+            if (hk.Register(_hotkeys.Handle, id)) Log.Write($"{name}快捷键已注册: {hk}");
+            else { Log.Write($"{name}快捷键注册失败（可能被其他程序占用）: {hk}"); bad.Add($"{name} {hk}"); }
+        }
+        const Keys CA = Keys.Control | Keys.Alt;
+        Reg(new Hotkey(CA, Keys.PageUp), Hotkey.PrevId, "上一句");
+        Reg(new Hotkey(CA, Keys.PageDown), Hotkey.NextId, "下一句");
+        Reg(new Hotkey(CA, Keys.C), Hotkey.ClipId, "朗读剪贴板");
+        if (bad.Count > 0) FlashStatus("这些快捷键被别的程序占用了，暂时用不了：\n" + string.Join("、", bad), 6000);
     }
 
     private bool TryRegister(Hotkey wanted, int id, Hotkey previous, string name, List<string> errors, out Hotkey result)
@@ -790,7 +821,7 @@ internal sealed class MainForm : Form
         Log.Write("继续");
     }
 
-    private async Task StartReadingAsync(long pressedAt, CaretTextGrabber.Target target)
+    private async Task StartReadingAsync(long pressedAt, CaretTextGrabber.Target target, string? clipboardText = null)
     {
         int session = ++_readSession;
         var cts = new CancellationTokenSource();
@@ -801,7 +832,12 @@ internal sealed class MainForm : Form
         SetState(State.Grabbing);
 
         CaretTextGrabber.Result grab;
-        try { grab = await _grabber.GrabAsync(target, cts.Token); }
+        try
+        {
+            grab = clipboardText != null
+                ? new CaretTextGrabber.Result(clipboardText, "剪贴板", "Ctrl+Alt+C 朗读剪贴板") { Selection = true }
+                : await _grabber.GrabAsync(target, cts.Token);
+        }
         catch (OperationCanceledException) { return; }
         catch (Exception ex)
         {
@@ -832,30 +868,40 @@ internal sealed class MainForm : Form
         var queue = new ClauseQueue();
         queue.Add(first);
         if (grab.Rest == null) queue.Complete();
+        _docCts?.Cancel();
+        _docCts = new CancellationTokenSource();
+        _queue = queue;
+        _readingSelection = grab.Selection;
+        if (grab.Rest != null) _ = FetchRestAsync(grab.Rest, queue, layer, _docCts.Token);
 
+        await RunQueueAsync(queue, 0, pressedAt, session, cts, _pauseRequested);
+    }
+
+    /// <summary>从第 startIndex 句开始读这篇文字（开始朗读、上一句 / 下一句、换音色续读都走这里）。</summary>
+    private async Task RunQueueAsync(ClauseQueue queue, int startIndex, long pressedAt, int session, CancellationTokenSource cts, bool startPaused)
+    {
         var voice = (VoicePack)_voiceMenu.SelectedItem!;
         float speed = (float)Math.Clamp(voice.Speed * _settings.Speed, 0.5, 2.0);
-        _readingSelection = grab.Selection;
         var sink = new NAudioSink();
-        _sink = sink;
-        if (_pauseRequested) { sink.Pause(); SetState(State.Paused); }
+        var track = new PlaybackTracker();
+        _sink = sink; _track = track; _runStart = startIndex; _navIndex = null;
+        if (startPaused) { sink.Pause(); SetState(State.Paused); }
         else SetState(State.Reading);
         _pauseRequested = false;
 
         CrashGuard.Mark($"朗读中（{voice.Id}）");
         var task = SpeechPipeline.RunAsync(queue, _engine, voice.Sid, speed, sink, cts.Token,
-                                           onClause: null, hotkeyTimestamp: pressedAt, gain: (float)voice.Gain)
+                                           onClause: null, hotkeyTimestamp: pressedAt, gain: (float)voice.Gain,
+                                           startIndex: startIndex, tracker: track)
             .ContinueWith(t =>
             {
                 var st = t.Result;
-                Log.Write($"朗读结束: 小句 {st.Clauses}/{queue.Count}，按键→出声 {st.FirstAudioLatencySeconds:0.00}s" +
+                Log.Write($"朗读结束: 小句 {st.Clauses}/{queue.Count}（从第 {startIndex + 1} 句起），按键→出声 {st.FirstAudioLatencySeconds:0.00}s" +
                           $"（其中取文字和切分 {st.StartOffsetSeconds:0.00}s），RTF {st.Rtf:0.00}，取消={st.Cancelled}，错误={st.Error ?? "无"}");
                 sink.Dispose();
                 return st;
             }, TaskScheduler.Default);
         _readTask = task;
-
-        if (grab.Rest != null) _ = FetchRestAsync(grab.Rest, queue, layer, cts.Token);
 
         PipelineStats? stats = null;
         try { stats = await task; }
@@ -864,12 +910,64 @@ internal sealed class MainForm : Form
         {
             if (session == _readSession)
             {
-                _sink = null;
+                _sink = null; _track = null; _queue = null;
+                _docCts?.Cancel();
                 _readingSelection = false;
                 SetState(State.Idle);
             }
         }
         if (session == _readSession && stats?.Error != null) FlashStatus("朗读出错：" + stats.Error, 6000);
+    }
+
+    // ---------- 第 3 轮：上一句 / 下一句、朗读剪贴板 ----------
+
+    private int CurrentClauseIndex() => _navIndex ?? _track?.CurrentIndex(_runStart) ?? _runStart;
+
+    /// <summary>从第 index 句重新开始读。先停掉当前这一路（声音立刻停），等当前合成收尾，再接着读。</summary>
+    private async Task RestartFromAsync(int index, bool startPaused)
+    {
+        var q = _queue;
+        if (q == null) return;
+        int session = ++_readSession;
+        _readCts?.Cancel();
+        var cts = new CancellationTokenSource();
+        _readCts = cts;
+        _sink = null;
+        _navIndex = index;
+        var old = _readTask;
+        try { await old; } catch { }
+        if (session != _readSession || cts.IsCancellationRequested) return;
+        await RunQueueAsync(q, index, Stopwatch.GetTimestamp(), session, cts, startPaused);
+    }
+
+    private void NavSentence(int delta)
+    {
+        if (_queue == null || _state is not (State.Reading or State.Paused))
+        {
+            FlashStatus("正在朗读时才能用上一句 / 下一句");
+            return;
+        }
+        int cur = CurrentClauseIndex();
+        int target = Math.Max(0, cur + delta);
+        if (delta > 0 && _queue.Peek(target, out bool end) == null && end) { FlashStatus("已经是最后一句了"); return; }
+        Log.Write($"{(delta < 0 ? "上一句" : "下一句")}: 第 {cur + 1} 句 → 第 {target + 1} 句");
+        _ = RestartFromAsync(target, startPaused: false);
+    }
+
+    /// <summary>Ctrl+Alt+C：朗读剪贴板里的文字（只读剪贴板，不改它）。读不到光标文字的程序都能用。</summary>
+    private void OnClipboardKey(long pressedAt)
+    {
+        if (_state is State.Loading or State.NoModel) { _ = OnMainActionAsync(pressedAt, CurrentTarget("剪贴板")); return; }
+        string? text = null;
+        for (int i = 0; i < 3 && text == null; i++)
+        {
+            try { text = Clipboard.ContainsText() ? Clipboard.GetText() : ""; }
+            catch (Exception ex) { Log.Write("读剪贴板失败: " + ex.GetType().Name); Thread.Sleep(30); }
+        }
+        if (string.IsNullOrWhiteSpace(text)) { FlashStatus("剪贴板里没有文字。先复制（Ctrl+C）一段文字，再按 Ctrl+Alt+C。", 4000); return; }
+        if (text.Length > CaretTextGrabber.MaxChars) text = text.Substring(0, CaretTextGrabber.MaxChars);
+        if (_state is State.Grabbing or State.Reading or State.Paused) StopReading();
+        _ = StartReadingAsync(pressedAt, CurrentTarget("剪贴板"), text);
     }
 
     private static async Task FetchRestAsync(Func<string?> rest, ClauseQueue queue, CaretReader.Core.Text.TextLayer layer, CancellationToken token)
@@ -891,6 +989,8 @@ internal sealed class MainForm : Form
         _readSession++;
         _readCts?.Cancel();
         _readCts = null;
+        _docCts?.Cancel();
+        _queue = null; _track = null; _navIndex = null;
         _sink = null;
         _pauseRequested = false;
         if (_state is State.Reading or State.Grabbing or State.Paused) SetState(State.Idle);
@@ -904,6 +1004,28 @@ internal sealed class MainForm : Form
         if (_voiceMenu.SelectedItem is not VoicePack v) return;
         _settings.VoiceId = v.Id;
         try { _settings.Save(_settingsPath); } catch { }
+
+        // 第 3 轮：朗读中换音色 → 记住读到第几句，换好后从这句继续（不从头来）
+        var q = _queue;
+        if (q != null && _state is State.Reading or State.Paused)
+        {
+            int resumeAt = CurrentClauseIndex();
+            bool wasPaused = _state == State.Paused;
+            int session = ++_readSession;
+            _readCts?.Cancel();
+            var cts = new CancellationTokenSource();
+            _readCts = cts;
+            _sink = null;
+            try { await _readTask; } catch { }
+            if (session != _readSession) return;     // 期间用户按了停止或又换了一次
+            Log.Write($"朗读中换音色: 从第 {resumeAt + 1} 句继续");
+            await LoadSelectedVoiceAsync();
+            if (session != _readSession) return;
+            if (_state == State.Idle && !cts.IsCancellationRequested)
+                await RunQueueAsync(q, resumeAt, Stopwatch.GetTimestamp(), session, cts, wasPaused);
+            else { _docCts?.Cancel(); _queue = null; _track = null; }
+            return;
+        }
         StopReading();
         await LoadSelectedVoiceAsync();
     }
