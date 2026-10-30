@@ -75,7 +75,7 @@ internal sealed class MainForm : Form
     private int _tbOverMs, _tbAwayMs;
     private readonly StopButton _stop = new();               // P0：■ 停止按钮
     private readonly InkDropDown _voiceMenu = new();          // 不放进窗口，只用它的音色菜单（带试听小喇叭）
-    private readonly ContextMenuStrip _menu = new() { Renderer = new InkMenuRenderer(), ShowImageMargin = false, ShowCheckMargin = false };
+    private readonly NoActivateMenu _menu = new() { Renderer = new InkMenuRenderer(), ShowImageMargin = false, ShowCheckMargin = false };
     private NotifyIcon? _tray;
     private string _petFrame = "sleep";
     private int _lastDrawnFrame = -1;
@@ -995,6 +995,7 @@ internal sealed class MainForm : Form
         _queue = null; _track = null; _navIndex = null;
         _sink = null;
         _pauseRequested = false;
+        _player.Stop();   // 正在试听的样本音也一并停（审查意见 3）
         if (_state is State.Reading or State.Grabbing or State.Paused) SetState(State.Idle);
     }
 

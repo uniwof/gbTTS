@@ -71,7 +71,7 @@ internal class InkButton : Control
 /// </summary>
 internal sealed class InkDropDown : InkButton
 {
-    private readonly ContextMenuStrip _menu = new() { Renderer = new InkMenuRenderer(), ShowImageMargin = false, ShowCheckMargin = false, ShowItemToolTips = true };
+    private readonly NoActivateMenu _menu = new() { Renderer = new InkMenuRenderer(), ShowImageMargin = false, ShowCheckMargin = false, ShowItemToolTips = true };
     private readonly List<object> _items = new();
     private int _selected = -1;
     private bool _speakerHit;   // 最近一次在菜单里按下鼠标时，是不是按在小喇叭上
