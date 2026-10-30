@@ -37,6 +37,9 @@ public sealed class TextLayer
             _cached = new TextLayer(p, t, s);
             _cachedKey = key;
             Log.Write($"文本层：规则 {p.Rules.RuleCount} 条，写错 {p.Errors.Count + t.Errors.Count} 行");
+            // 硬要求 11：写错的行只跳过并记日志（只记文件名、行号、原因，不记行内文字）
+            foreach (var e in p.Errors.Concat(t.Errors))
+                Log.Write($"规则跳过：{e.FileName} 第 {e.Line} 行：{e.Reason}");
             return _cached;
         }
     }

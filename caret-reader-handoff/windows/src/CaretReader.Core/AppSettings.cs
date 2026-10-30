@@ -33,7 +33,7 @@ public sealed class PauseSettings
 ///
 /// 保存在哪里？
 ///   1) 如果程序所在文件夹可以写入 → 就放在 exe 旁边（方便“绿色版”整体拷走）。
-///   2) 否则（比如装在 C:\Program Files 里）→ 放在 %AppData%\CaretReader\settings.json。
+///   2) 否则（比如装在 C:\Program Files 里）→ 放在 %AppData%\gbTTS\settings.json。
 /// </summary>
 public sealed class AppSettings
 {
@@ -102,14 +102,17 @@ public sealed class AppSettings
     /// <summary>
     /// 计算 settings.json 的完整路径（规则见类说明）。
     /// </summary>
-    public static string ResolvePath(string appDir)
+    public static string ResolvePath(string appDir, string? appDataRoot = null)
     {
         string local = Path.Combine(appDir, "settings.json");
         if (File.Exists(local)) return local;
         if (IsDirWritable(appDir)) return local;
 
-        string appData = Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "CaretReader");
+        // 程序文件夹不可写（例如装在 C:\Program Files）→ 用 %AppData%\gbTTS\（硬要求 10）
+        string root = appDataRoot ?? Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
+        string legacy = Path.Combine(root, "CaretReader", "settings.json");   // 旧版放这里，有就继续用，升级不丢设置
+        if (File.Exists(legacy)) return legacy;
+        string appData = Path.Combine(root, "gbTTS");
         Directory.CreateDirectory(appData);
         return Path.Combine(appData, "settings.json");
     }
