@@ -3,7 +3,7 @@ name: windows-build
 
 on:
   push:
-    branches: [main, dev, 'feat/**']
+    branches: [main, dev]   # 功能分支走 pull_request，避免同一提交跑两遍
     paths: ['caret-reader-handoff/windows/**', '.github/workflows/windows.yml']
   pull_request:
     branches: [dev, main]

@@ -20,6 +20,7 @@ $ErrorActionPreference = 'Stop'
 $PSNativeCommandUseErrorActionPreference = $true
 $Here = $PSScriptRoot
 $env:DOTNET_CLI_TELEMETRY_OPTOUT = '1'; $env:DOTNET_NOLOGO = '1'
+$env:PYTHONUTF8 = '1'; $env:PYTHONIOENCODING = 'utf-8'   # Windows 控制台默认 cp1252，Python 打印中文会报错
 if (-not $Out) { $Out = Join-Path (Split-Path $Here -Parent) 'release' }
 if (-not $Models) { $Models = Join-Path $Here 'models' }
 
