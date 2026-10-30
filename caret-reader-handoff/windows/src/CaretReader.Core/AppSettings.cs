@@ -55,6 +55,9 @@ public sealed class AppSettings
     /// <summary>标点停顿。</summary>
     public PauseSettings Pauses { get; set; } = new();
 
+    /// <summary>P1 文本层设置（Markdown 清理、标题识别、英文策略、规则包开关）。</summary>
+    public CaretReader.Core.Settings.TextLayerSettings Text { get; set; } = new();
+
     /// <summary>窗口是否总在最前面。</summary>
     public bool TopMost { get; set; } = true;
 
@@ -89,6 +92,8 @@ public sealed class AppSettings
         Speed = Math.Clamp(Speed, 0.5, 2.0);
         NumThreads = Math.Clamp(NumThreads, 1, 8);
         Pauses ??= new PauseSettings();
+        Text ??= new CaretReader.Core.Settings.TextLayerSettings();
+        Text.RulePacks ??= new(StringComparer.OrdinalIgnoreCase);
         Pauses.Clamp();
         if (string.IsNullOrWhiteSpace(Hotkey)) Hotkey = "Ctrl+Alt+R";
         if (string.IsNullOrWhiteSpace(StopHotkey)) StopHotkey = "Ctrl+Alt+S";
@@ -184,9 +189,9 @@ public sealed class AppSettings
             if (!props.TryGetValue(key, out var prop)) continue;   // 不认识的项：忽略
             try
             {
-                if (prop.PropertyType == typeof(PauseSettings))
+                if (prop.PropertyType == typeof(PauseSettings) || prop.PropertyType == typeof(CaretReader.Core.Settings.TextLayerSettings))
                 {
-                    var pz = new PauseSettings();
+                    var pz = Activator.CreateInstance(prop.PropertyType)!;
                     if (node is JsonObject sub) ApplyLenient(pz, sub, errors, prefix + prop.Name + ".");
                     else if (node != null) errors.Add(prefix + prop.Name);
                     prop.SetValue(target, pz);
