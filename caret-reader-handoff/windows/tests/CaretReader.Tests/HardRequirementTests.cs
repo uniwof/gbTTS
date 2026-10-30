@@ -6,6 +6,7 @@ using Xunit;
 namespace CaretReader.Tests;
 
 /// <summary>精简版第 2 节硬要求 10、11 的自动检查（其余几条要真 Windows，在人工清单里）。</summary>
+[Collection("TextLayerStatic")]
 public class HardRequirementTests
 {
     static string Tmp() { var d = Path.Combine(Path.GetTempPath(), "gbtts-hr-" + Guid.NewGuid().ToString("N")); Directory.CreateDirectory(d); return d; }
