@@ -13,6 +13,7 @@
 //   dotnet run -- g2p <frontend数据> <输入.txt> [用户词库]    v0.5：每行输出多音字前端的定音结果（与 Python 实验版逐字对比用）
 //   dotnet run -- fbench <frontend数据> <输入.txt> [用户词库] v0.5：前端单独的加载时间、内存峰值、每千字耗时
 //   dotnet run -- frontendtest <frontend数据> <音色包>        v0.5：用户词库格式 / PUA 转换 / 生僻字 自动测试
+//   dotnet run -- pace <音色包>...                      第 2 轮：中文路径加载、去静音、字/分统一（CI 用清朗跑）
 //   dotnet run -- packtest                             v0.4：音色包校验 / 扫描 / 导入（中文路径、坏包、重复）自动测试
 
 using System.Diagnostics;
@@ -46,6 +47,7 @@ return mode switch
     "abcpu" => V05Tests.AbCpu(args[1], args[2], args.Length > 3 ? int.Parse(args[3]) : 3),
     "frontendtest" => V05Tests.FrontendTest(args[1], args[2]),
     "v06" => V06Tests.Run(),
+    "pace" => PaceTests.Run(args.Skip(1).ToArray()),
     _ => Usage()
 };
 

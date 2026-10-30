@@ -59,6 +59,9 @@ if ($WithVoice) {
     python "$Here\packs.py" assemble "$Here\pk\voices" chaowen-0
     Copy-Item "$Here\config\samples\chaowen-0.mp3" "$Here\pk\voices\chaowen-0\sample.mp3"
     $Voices = @('chaowen-0')
+    Step '4b. 第 2 轮节奏检查：中文路径加载、去首尾静音、字/分统一（清朗）'
+    & $Harness pace "$Here\pk\voices\chaowen-0" | Out-Host
+    if ($LASTEXITCODE -ne 0) { throw "第 2 轮节奏检查失败（退出码 $LASTEXITCODE）" }
 }
 
 Step '5. 组装便携版文件夹'
@@ -86,6 +89,8 @@ if ($WithVoice) {
     # 自检产生的文件不进发布包（日志 / wav / 设置）
     Get-ChildItem $App -File | Where-Object { $_.Name -like 'selftest*' -or $_.Name -in 'log.txt', 'settings.json', 'crash_stage.txt' } |
         ForEach-Object { Copy-Item $_.FullName (Join-Path $Here 'TestResults') -ErrorAction SilentlyContinue; Remove-Item $_.FullName }
+    # 第 2 轮：自检若产生了 data\（节奏设置 / 测速缓存）也不进发布包
+    if (Test-Path "$App\data") { Remove-Item "$App\data" -Recurse -Force }
 }
 
 Step '7. 打 zip'

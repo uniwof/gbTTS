@@ -1,0 +1,11 @@
+# 第 2 轮：去首尾静音参数（文档 6.1）。列：键	值。# 开头是注释；写错的行会被跳过。
+# 音色包 voice.json 的 pacing.trimDb 可以覆盖 relativeDb。
+enabled	1
+frameMs	10
+floorDb	-50
+relativeDb	-35
+keepHeadMs	20
+keepTailMs	50
+fadeInMs	3
+fadeOutMs	8
+innerCutSeconds	0.04
