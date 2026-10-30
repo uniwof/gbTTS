@@ -6,7 +6,17 @@ namespace CaretReader.Core;
 /// <summary>
 /// 一个“小句”：要朗读的文字 + 读完之后要停顿多少秒。
 /// </summary>
-public sealed record Clause(string Text, double PauseAfterSeconds);
+public sealed record Clause(string Text, double PauseAfterSeconds, CaretReader.Core.Text.PauseKind Kind = CaretReader.Core.Text.PauseKind.None);
+
+/// <summary>P1 新停顿模型的切句选项。</summary>
+public sealed class SplitOptions
+{
+    /// <summary>标题识别（文档 5.6.1）：一行 ≤ TitleMaxChars 字、不以句末标点结尾、下一行比它长 → 标题停顿。</summary>
+    public bool TitleDetection { get; set; } = true;
+    public int TitleMaxChars { get; set; } = 25;
+    /// <summary>MarkdownCleaner 给出的每行类别（标题 / 列表项），可为 null。下标是第几行（从 0 开始）。</summary>
+    public IReadOnlyList<CaretReader.Core.Text.PauseKind>? LineKinds { get; set; }
+}
 
 /// <summary>
 /// 把一大段文字按标点切成小句，并给每个小句配上“停顿时长”。
@@ -87,20 +97,45 @@ public static class TextSplitter
     public static List<Clause> Split(string? text, PauseSettings pauses) => Split(text, pauses, firstChunk: true);
 
     /// <summary>
+    /// P1：用标点表（rules/punctuation.tsv + 用户标点表）切分。支持前停顿（《 “ （ —— 前面停一下）、
+    /// 段落 / 换行 / 标题 / 列表项停顿、长句中间切开处的衔接间隙（&lt;切分&gt;）。
+    /// 合并规则：连在一起的停顿取最大值，不相加；前停顿与前一个标点的后停顿相遇也取最大值。
+    /// 返回的停顿是基础值（还没乘全局倍率）。
+    /// </summary>
+    public static List<Clause> Split(string? text, CaretReader.Core.Text.PunctuationTable table, SplitOptions? options = null,
+        bool firstChunk = true, int maxChars = 0)
+    {
+        options ??= new SplitOptions();
+        text = Truncate(text, maxChars);
+        var raw = SplitAtTable(NormalizeUnreadable(text), table, options);
+        return ControlLength(raw, firstChunk, table.Special(CaretReader.Core.Text.PunctuationTable.InnerCut).After);
+    }
+
+    private static string? Truncate(string? text, int maxChars)
+    {
+        if (text != null && maxChars > 0 && text.Length > maxChars)
+        {
+            int cut = maxChars;
+            if (char.IsHighSurrogate(text[cut - 1])) cut--;
+            text = text.Substring(0, cut);
+        }
+        return text;
+    }
+
+    /// <summary>
     /// 切分文字。firstChunk=false 表示这是“后续取到的文字”（接在已经在读的内容后面），
     /// 这时第一句不需要特别缩短到 20 字。maxChars &gt; 0 时先截断到这么多字符（防止超大文本）。
     /// </summary>
     public static List<Clause> Split(string? text, PauseSettings pauses, bool firstChunk, int maxChars = 0)
     {
-        if (text != null && maxChars > 0 && text.Length > maxChars)
-        {
-            int cut = maxChars;
-            if (char.IsHighSurrogate(text[cut - 1])) cut--;      // 不要切开 emoji
-            text = text.Substring(0, cut);
-        }
+        text = Truncate(text, maxChars);
         var raw = SplitAtPunctuation(NormalizeUnreadable(text), pauses);
+        return ControlLength(raw, firstChunk, 0.0);
+    }
 
-        // ---------- 第二步：控制长度 ----------
+    /// <summary>第二步：控制长度。innerCut = 长句中间切开处插入的衔接间隙（旧模型为 0）。</summary>
+    private static List<Clause> ControlLength(List<Clause> raw, bool firstChunk, double innerCut)
+    {
         var result = new List<Clause>(raw.Count + 4);
         for (int i = 0; i < raw.Count; i++)
         {
@@ -113,21 +148,21 @@ public static class TextSplitter
                 var (head, tail) = CutOnce(c.Text, FirstClauseMaxChars, MaxClauseChars);
                 if (tail.Length > 0)
                 {
-                    if (HasSpeakable(head)) result.Add(new Clause(head, 0.0));
+                    if (HasSpeakable(head)) result.Add(new Clause(head, innerCut, innerCut > 0 ? CaretReader.Core.Text.PauseKind.InnerCut : CaretReader.Core.Text.PauseKind.None));
                     c = c with { Text = tail };
                 }
             }
             foreach (var piece in SplitLong(c.Text, MaxClauseChars))
-                if (HasSpeakable(piece)) result.Add(new Clause(piece, 0.0));
+                if (HasSpeakable(piece)) result.Add(new Clause(piece, innerCut, innerCut > 0 ? CaretReader.Core.Text.PauseKind.InnerCut : CaretReader.Core.Text.PauseKind.None));
             if (result.Count == before)
             {
                 // 这一句切完后没有能读的部分（极少见，例如一长串符号）：停顿并入上一句
                 if (result.Count > 0 && c.PauseAfterSeconds > result[^1].PauseAfterSeconds)
-                    result[^1] = result[^1] with { PauseAfterSeconds = c.PauseAfterSeconds };
+                    result[^1] = result[^1] with { PauseAfterSeconds = c.PauseAfterSeconds, Kind = c.Kind };
                 continue;
             }
             // 原小句的停顿只加在最后一段后面
-            result[^1] = result[^1] with { PauseAfterSeconds = c.PauseAfterSeconds };
+            result[^1] = result[^1] with { PauseAfterSeconds = c.PauseAfterSeconds, Kind = c.Kind };
         }
         return result;
     }
@@ -259,6 +294,168 @@ public static class TextSplitter
         // 最后剩下的文字（没有以标点结尾）
         Flush(result, current, 0.0);
         return result;
+    }
+
+    // =====================================================================
+    // 第一步（P1 新模型）：按标点表切
+    // =====================================================================
+    private const string SentenceEnders = "。！？.!?…；;：:，,、~～—";
+
+    private static List<Clause> SplitAtTable(string? text, CaretReader.Core.Text.PunctuationTable table, SplitOptions opt)
+    {
+        var result = new List<Clause>();
+        if (string.IsNullOrEmpty(text)) return result;
+        text = text.Replace("\r\n", "\n").Replace('\r', '\n');
+
+        var inUrl = new bool[text.Length];
+        foreach (Match m in UrlRegex.Matches(text))
+        {
+            int end = m.Index + m.Length;
+            while (end > m.Index && ".,;:!?)".IndexOf(text[end - 1]) >= 0) end--;
+            for (int k = m.Index; k < end; k++) inUrl[k] = true;
+        }
+        var lineEnd = LineEndPauses(text, table, opt);
+
+        var current = new StringBuilder();
+        int quotes = 0, line = 0, i = 0;
+        while (i < text.Length)
+        {
+            char c = text[i];
+            if (c == '\n')
+            {
+                int nl = 0;
+                while (i < text.Length && (text[i] == '\n' || text[i] == ' ' || text[i] == '\t' || text[i] == '\u3000'))
+                { if (text[i] == '\n') nl++; i++; }
+                var (p, k) = lineEnd[line];
+                if (nl >= 2)
+                {
+                    var para = table.Special(CaretReader.Core.Text.PunctuationTable.Paragraph);
+                    if (para.After >= p) { p = para.After; k = para.Kind; }
+                }
+                line += nl;
+                FlushK(result, current, p, k);
+                continue;
+            }
+
+            var e = inUrl[i] ? null : PunctAt(text, i, table);
+            if (e != null)
+            {
+                if (e.Before > 0)
+                    FlushK(result, current, e.Before, e.Kind);      // 前停顿：在符号前面切开（与上一句的停顿取最大值）
+                if (e.After <= 0)
+                {
+                    // 只有前停顿（《 “ （）：符号跟着下一句走
+                    current.Append(text, i, e.Symbol.Length);
+                    i += e.Symbol.Length;
+                    continue;
+                }
+                double maxPause = e.After;
+                var kind = e.Kind;
+                current.Append(text, i, e.Symbol.Length);
+                i += e.Symbol.Length;
+                while (i < text.Length && !inUrl[i])
+                {
+                    var n = PunctAt(text, i, table);
+                    if (n != null && n.Before > 0 && n.After <= 0)
+                    {
+                        // 例如“。《”：《 留给下一句，停顿取 max(0.45, 0.08)
+                        if (n.Before > maxPause) { maxPause = n.Before; kind = n.Kind; }
+                        break;
+                    }
+                    if (n != null)
+                    {
+                        if (Math.Max(n.Before, n.After) > maxPause) { maxPause = Math.Max(n.Before, n.After); kind = n.Kind; }
+                        current.Append(text, i, n.Symbol.Length); i += n.Symbol.Length;
+                    }
+                    else if (Closers.IndexOf(text[i]) >= 0) { current.Append(text[i]); i++; }
+                    else if (text[i] == '"' && quotes % 2 == 1) { quotes++; current.Append('"'); i++; }
+                    else break;
+                }
+                FlushK(result, current, maxPause, kind);
+                continue;
+            }
+            if (c == '"') quotes++;
+            current.Append(c);
+            i++;
+        }
+        var (lp, lk) = lineEnd[line];
+        FlushK(result, current, lp, lk);
+        return result;
+    }
+
+    /// <summary>text[i] 处的标点（已排除数字中间的 . , : 、网址、英文缩写等）；不需要停顿就返回 null。</summary>
+    private static CaretReader.Core.Text.PunctEntry? PunctAt(string text, int i, CaretReader.Core.Text.PunctuationTable table)
+    {
+        var e = table.MatchAt(text, i);
+        if (e == null || (e.Before <= 0 && e.After <= 0)) return null;
+        if (e.Symbol.Length > 1) return e;
+        char c = text[i];
+        char prev = i > 0 ? text[i - 1] : '\0';
+        char next = i + 1 < text.Length ? text[i + 1] : '\0';
+        bool betweenDigits = char.IsDigit(prev) && char.IsDigit(next);
+        switch (c)
+        {
+            case '，': case ',': case '：': case '．': case '~': case '～':
+                if (betweenDigits) return null;
+                break;
+            case '.':
+                if (betweenDigits || char.IsLetterOrDigit(next) || IsAbbreviation(text, i)) return null;
+                break;
+            case ':':
+                if (betweenDigits || next == '/') return null;
+                break;
+        }
+        return e;
+    }
+
+    /// <summary>
+    /// 每一行行尾的停顿：普通换行 / 标题（MarkdownCleaner 标出的，或自动识别的）/ 列表项。
+    /// 下标 = 行号；最后一行（没有换行结尾）只在是标题时给停顿。
+    /// </summary>
+    private static (double pause, CaretReader.Core.Text.PauseKind kind)[] LineEndPauses(string text,
+        CaretReader.Core.Text.PunctuationTable table, SplitOptions opt)
+    {
+        var lines = text.Split('\n');
+        var res = new (double, CaretReader.Core.Text.PauseKind)[lines.Length + 1];
+        var nlE = table.Special(CaretReader.Core.Text.PunctuationTable.Newline);
+        var titleE = table.Special(CaretReader.Core.Text.PunctuationTable.Title);
+        var listE = table.Special(CaretReader.Core.Text.PunctuationTable.ListItem);
+        for (int k = 0; k < lines.Length; k++)
+        {
+            bool last = k == lines.Length - 1;
+            var mk = opt.LineKinds != null && k < opt.LineKinds.Count ? opt.LineKinds[k] : CaretReader.Core.Text.PauseKind.None;
+            bool title = mk == CaretReader.Core.Text.PauseKind.Title || (!last && opt.TitleDetection && LooksLikeTitle(lines, k, opt.TitleMaxChars));
+            if (title) res[k] = (titleE.After, titleE.Kind);
+            else if (mk == CaretReader.Core.Text.PauseKind.ListItem) res[k] = (listE.After, listE.Kind);
+            else res[k] = last ? (0.0, CaretReader.Core.Text.PauseKind.None) : (nlE.After, nlE.Kind);
+        }
+        res[lines.Length] = (0.0, CaretReader.Core.Text.PauseKind.None);
+        return res;
+    }
+
+    /// <summary>一行 ≤ 25 字、不以句末标点结尾、后面紧跟换行，且下一行（跳过空行）比它长 → 标题。</summary>
+    private static bool LooksLikeTitle(string[] lines, int k, int maxChars)
+    {
+        string t = lines[k].Trim(' ', '\t', '\u3000');
+        if (t.Length == 0 || t.Length > maxChars || !HasSpeakable(t)) return false;
+        if (SentenceEnders.IndexOf(t[^1]) >= 0) return false;
+        for (int j = k + 1; j < lines.Length; j++)
+        {
+            string n = lines[j].Trim(' ', '\t', '\u3000');
+            if (n.Length == 0) continue;
+            return n.Length > t.Length;
+        }
+        return false;
+    }
+
+    private static void FlushK(List<Clause> result, StringBuilder current, double pause, CaretReader.Core.Text.PauseKind kind)
+    {
+        string s = current.ToString().Trim(' ', '\t', '\u3000', '\n');
+        current.Clear();
+        if (HasSpeakable(s)) result.Add(new Clause(s, pause, kind));
+        else if (result.Count > 0 && pause > result[^1].PauseAfterSeconds)
+            result[^1] = result[^1] with { PauseAfterSeconds = pause, Kind = kind };
+        else if (s.Length > 0 && result.Count == 0) { /* 开头只有符号：丢弃 */ }
     }
 
     /// <summary>
