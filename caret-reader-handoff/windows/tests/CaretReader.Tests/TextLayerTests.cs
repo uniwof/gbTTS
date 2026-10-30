@@ -19,6 +19,9 @@ public class TextLayerTests
     public void Golden_text_becomes_clauses_with_new_pauses()
     {
         var (app, set) = Setup();
+        string ud = TextLayerSettings.UserDataDir(set);
+        Directory.CreateDirectory(ud);
+        File.WriteAllText(Path.Combine(ud, SettingsMigration.UserRulesFile), "替换\tYYDS\t永远的神\t整词\n");
         var tl = TextLayer.For(app, set, new TextLayerSettings());
         var cl = tl.Split("## 第三章 结论\nYYDS！他把GDP讲清楚了。", firstChunk: false);
         Assert.Equal("第三章 结论", cl[0].Text);

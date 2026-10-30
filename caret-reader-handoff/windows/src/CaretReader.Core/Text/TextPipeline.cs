@@ -8,7 +8,7 @@ public sealed class TextPipelineOptions
     public EnglishPolicy EnglishPolicy { get; set; } = EnglishPolicy.Spell;
     public bool VoiceSpeaksEnglish { get; set; }
     public EmojiMode Emoji { get; set; } = EmojiMode.Skip;
-    /// <summary>内置规则包开关：文件名（slang.tsv、templates.tsv …）→ 是否启用。没写的默认启用。</summary>
+    /// <summary>内置规则包开关：文件名（templates.tsv …）→ 是否启用。没写的默认启用。</summary>
     public Dictionary<string, bool> RulePacks { get; set; } = new(StringComparer.OrdinalIgnoreCase);
 }
 
@@ -27,7 +27,7 @@ public sealed record TextResult(List<Segment> Segments, IReadOnlyList<PauseKind>
 public sealed class TextPipeline
 {
     /// <summary>内置“读法”规则包（按文件名决定优先级）。markdown/symbols/letters/punctuation 不是读法规则。</summary>
-    public static readonly string[] RulePackFiles = { "slang.tsv", "templates.tsv" };
+    public static readonly string[] RulePackFiles = { "templates.tsv" };
 
     public MarkdownCleaner Markdown { get; }
     public RulesEngine Rules { get; }

@@ -52,20 +52,11 @@ public class RuleFileTests
     }
 
     [Theory]
-    [InlineData("slang.tsv")]
     [InlineData("templates.tsv")]
     public void Builtin_rule_files_have_no_errors(string name)
     {
         var f = RuleFile.Parse(RulesTestData.Read(name), name, RuleFile.PriorityBuiltin);
         Assert.Empty(f.Errors);
         Assert.NotEmpty(f.Rules);
-    }
-
-    [Fact]
-    public void Slang_pack_has_at_least_50_whole_word_rules()
-    {
-        var f = RuleFile.Parse(RulesTestData.Read("slang.tsv"), "slang.tsv", RuleFile.PrioritySlang);
-        Assert.True(f.Rules.Count >= 50);
-        Assert.All(f.Rules, r => Assert.True(r.WholeWord, r.Source + " 必须整词匹配"));
     }
 }
