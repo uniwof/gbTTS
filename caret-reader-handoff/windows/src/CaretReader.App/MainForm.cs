@@ -9,7 +9,8 @@ namespace CaretReader.App;
 /// 主窗口 v0.6：屏幕右下角的悬浮球（一只在看书的小人，也可以换成简单圆球）。
 ///
 ///   单击：没在读 → 从光标处开始朗读（有选中文字就只读选中的）；正在读 → 暂停；已暂停 → 继续
-///   双击：停止
+///         P0 起单击立刻生效（取消了“双击停止”，不再等双击判定）
+///   ■ 停止：取文字 / 朗读 / 暂停时，球旁边（远离屏幕边缘的一侧）滑出一个 ■ 按钮（Ui/StopButton.cs）
 ///   右键：菜单（选择音色 / 试听、导入音色包、始终置顶、外观、设置、关于、退出）
 ///   按住拖动：移到任意位置（位置会记住）
 ///
@@ -53,7 +54,6 @@ internal sealed class MainForm : Form
 
     private FocusTracker? _tracker;
     private readonly System.Windows.Forms.Timer _anim = new();
-    private readonly System.Windows.Forms.Timer _clickTimer = new();
     private readonly System.Windows.Forms.Timer _hoverTimer = new() { Interval = 700 };
     private readonly System.Windows.Forms.Timer _progressTimer = new() { Interval = 80 };
     private readonly Stopwatch _loadClock = new();
@@ -63,6 +63,7 @@ internal sealed class MainForm : Form
     // ---------- 外观 ----------
     private readonly BallRenderer _render = new();
     private readonly Bubble _bubble = new();
+    private readonly StopButton _stop = new();               // P0：■ 停止按钮
     private readonly InkDropDown _voiceMenu = new();          // 不放进窗口，只用它的音色菜单（带试听小喇叭）
     private readonly ContextMenuStrip _menu = new() { Renderer = new InkMenuRenderer(), ShowImageMargin = false, ShowCheckMargin = false };
     private NotifyIcon? _tray;
@@ -80,7 +81,6 @@ internal sealed class MainForm : Form
     // ---------- 鼠标 ----------
     private bool _leftDown, _dragging;
     private Point _downScreen, _downWindow;
-    private bool _singlePending;
     private CaretTextGrabber.Target? _clickTarget;
 
     public MainForm()
@@ -109,7 +109,11 @@ internal sealed class MainForm : Form
 
         _hotkeys.Pressed += OnHotkey;
         _anim.Tick += (_, _) => AnimTick();
-        _clickTimer.Tick += (_, _) => { _clickTimer.Stop(); if (_singlePending) { _singlePending = false; OnSingleClick(); } };
+        _stop.StopClicked += () =>
+        {
+            Log.Write($"点 ■ 停止（状态 {_state}）");
+            if (_state is State.Grabbing or State.Reading or State.Paused) { StopReading(); FlashStatus("已停止", 2500); }
+        };
         _hoverTimer.Tick += (_, _) => { _hoverTimer.Stop(); if (_hover && !_leftDown) ShowStatusBubble(); };
         _progressTimer.Tick += (_, _) => UpdateLoadProgress();
         _menu.Font = Ink.UiFont;
@@ -245,6 +249,21 @@ internal sealed class MainForm : Form
     {
         base.OnMove(e);
         Redraw();
+        if (_stop.Showing) _stop.ShowBeside(Bounds);   // 拖动球时 ■ 跟着走
+    }
+
+    /// <summary>P0：取文字 / 朗读 / 暂停时显示 ■，其它状态收起。球被隐藏时也收起。</summary>
+    private void UpdateStopButton()
+    {
+        if (IsDisposed || !IsHandleCreated) return;
+        bool show = Visible && BallLayout.ShowStop(_state == State.Grabbing, _state == State.Reading, _state == State.Paused);
+        if (show) _stop.ShowBeside(Bounds); else _stop.HideNow();
+    }
+
+    protected override void OnVisibleChanged(EventArgs e)
+    {
+        base.OnVisibleChanged(e);
+        UpdateStopButton();
     }
 
     /// <summary>
@@ -301,7 +320,7 @@ internal sealed class MainForm : Form
     }
 
     // =====================================================================
-    // 鼠标：单击 / 双击 / 右键 / 拖动
+    // 鼠标：单击 / 右键 / 拖动（P0 取消双击）
     // =====================================================================
     protected override void OnMouseDown(MouseEventArgs e)
     {
@@ -325,12 +344,11 @@ internal sealed class MainForm : Form
         if (!_hover) { _hover = true; Redraw(); _hoverTimer.Start(); }
         if (!_leftDown) return;
         var p = Cursor.Position;
-        var drag = SystemInformation.DragSize;
-        if (!_dragging && (Math.Abs(p.X - _downScreen.X) > Math.Max(4, drag.Width) || Math.Abs(p.Y - _downScreen.Y) > Math.Max(4, drag.Height)))
+        // P0：按下后移动超过 4px（按 DPI 缩放）算拖动，不算点击
+        if (!_dragging && BallLayout.IsDrag(p.X - _downScreen.X, p.Y - _downScreen.Y, Ink.S(this, BallLayout.DragThresholdPx)))
         {
             _dragging = true;
             _bubble.HideNow();
-            _singlePending = false; _clickTimer.Stop();
         }
         if (_dragging) Location = new Point(_downWindow.X + p.X - _downScreen.X, _downWindow.Y + p.Y - _downScreen.Y);
     }
@@ -368,46 +386,25 @@ internal sealed class MainForm : Form
     }
 
     /// <summary>
-    /// 单击与双击的区分：
-    ///   * 正在朗读时单击 = 立刻暂停（暂停不丢东西，不用等）；紧接着第二下 = 双击 = 停止。
-    ///   * 其它状态（就绪 / 已暂停）：等过了系统的双击间隔（通常 0.5 秒）还没有第二下，才算单击，
-    ///     避免双击“停止”时先误开始读一下（开始读可能要发 Ctrl+C 探测选区）。
+    /// P0：单击立刻生效（取消了 v0.6 的“双击停止”和等待双击判定的 0.5 秒）。
+    ///   * 正在朗读 → 立刻暂停；其它状态 → 开始 / 继续。停止请点球旁边的 ■ 或按停止快捷键。
     /// </summary>
     private void OnLeftClick(Point pt)
     {
-        var dbl = SystemInformation.DoubleClickSize;
-        _clicks ??= new ClickClassifier(SystemInformation.DoubleClickTime, Math.Max(dbl.Width, dbl.Height));
-        switch (_clicks.OnClick(Environment.TickCount64, pt.X, pt.Y, reading: _state == State.Reading))
+        if (_state == State.Reading)
         {
-            case ClickClassifier.Action.Double:
-                _singlePending = false; _clickTimer.Stop();
-                OnDoubleClickBall();
-                return;
-            case ClickClassifier.Action.PauseNow:
-                Log.Write("单击悬浮球：暂停");
-                PauseReading();
-                return;
-            default:
-                _singlePending = true;
-                _clickTimer.Interval = _clicks.DeferMs;
-                _clickTimer.Stop(); _clickTimer.Start();
-                return;
+            Log.Write("单击悬浮球：暂停");
+            PauseReading();
+            return;
         }
+        OnSingleClick();
     }
-    private ClickClassifier? _clicks;
 
     private void OnSingleClick()
     {
         Log.Write($"单击悬浮球（状态 {_state}）");
         var target = _clickTarget ?? CurrentTarget("单击悬浮球");
         _ = OnMainActionAsync(Stopwatch.GetTimestamp(), target);
-    }
-
-    private void OnDoubleClickBall()
-    {
-        Log.Write($"双击悬浮球（状态 {_state}）：停止");
-        if (_state is State.Grabbing or State.Reading or State.Paused) { StopReading(); FlashStatus("已停止"); }
-        else FlashStatus("现在没有在朗读。单击小人开始从光标处朗读");
     }
 
     // =====================================================================
@@ -437,7 +434,7 @@ internal sealed class MainForm : Form
         string act = _state switch { State.Reading or State.Grabbing => "暂停", State.Paused => "继续", _ => "从光标处朗读（单击小人）" };
         bool canAct = _state is State.Idle or State.Reading or State.Paused or State.Grabbing;
         _menu.Items.Add(Item(act, () => _ = OnMainActionAsync(Stopwatch.GetTimestamp(), CurrentTarget("菜单")), canAct));
-        _menu.Items.Add(Item("停止（双击小人）", () => { StopReading(); FlashStatus("已停止"); }, _state is State.Reading or State.Paused or State.Grabbing));
+        _menu.Items.Add(Item("停止（点小人旁边的 ■）", () => { StopReading(); FlashStatus("已停止"); }, _state is State.Reading or State.Paused or State.Grabbing));
         _menu.Items.Add(new ToolStripSeparator());
         string voiceName = (_voiceMenu.SelectedItem as VoicePack)?.Name ?? "（没有音色）";
         _menu.Items.Add(Item($"选择音色 / 试听：{voiceName}", () => BeginInvoke(() => _voiceMenu.ShowAt(new Point(Left, Top))),
@@ -487,7 +484,7 @@ internal sealed class MainForm : Form
                     _settings.BallX = null; _settings.BallY = null;
                     RestoreBallPosition();
                     ReassertTopMost();
-                    FlashStatus("我在这里 · 单击朗读 · 双击停止 · 右键菜单");
+                    FlashStatus("我在这里 · 单击朗读 / 暂停 · ■ 停止 · 右键菜单");
                 }
             };
         }
@@ -503,7 +500,7 @@ internal sealed class MainForm : Form
     {
         if (_bubble.Showing && !_bubbleIsHover) return;   // 正在显示重要提示：不覆盖
         _bubbleIsHover = true;
-        _bubble.ShowNear(Bounds, StatusText() + "\n单击：朗读 / 暂停 / 继续 · 双击：停止\n右键：音色、设置、置顶、退出", 6000);
+        _bubble.ShowNear(Bounds, StatusText() + "\n单击：朗读 / 暂停 / 继续 · ■ 或停止快捷键：停止\n右键：音色、设置、置顶、退出", 6000);
     }
 
     /// <summary>在球旁边显示一条提示，ms 毫秒后消失（默认 4 秒）。</summary>
@@ -571,13 +568,14 @@ internal sealed class MainForm : Form
             return;
         }
         await LoadSelectedVoiceAsync();
-        if (_state == State.Idle) FlashStatus("光标朗读已就绪\n单击小人：从光标处朗读 · 双击：停止 · 右键：菜单", 5000);
+        if (_state == State.Idle) FlashStatus("光标朗读已就绪\n单击小人：从光标处朗读 · 朗读时旁边的 ■：停止 · 右键：菜单", 5000);
     }
 
     protected override void OnFormClosing(FormClosingEventArgs e)
     {
         base.OnFormClosing(e);
-        _anim.Stop(); _progressTimer.Stop(); _clickTimer.Stop(); _hoverTimer.Stop();
+        _anim.Stop(); _progressTimer.Stop(); _hoverTimer.Stop();
+        _stop.HideNow();
         Microsoft.Win32.SystemEvents.SessionSwitch -= OnSessionSwitch;
         Microsoft.Win32.SystemEvents.DisplaySettingsChanged -= OnDisplayChanged;
         UnregisterHotkeys();
@@ -1108,6 +1106,7 @@ internal sealed class MainForm : Form
         if (s != State.Reading) _mouthLevel = 0;
         if (old != s) { _petFrame = s == State.Reading ? "talk0" : "idle"; _idleSeq = 0; }
         if (_tray != null) { string t = "光标朗读 · " + StatusText(); _tray.Text = t.Length > 63 ? t.Substring(0, 63) : t; }
+        UpdateStopButton();
         ScheduleAnim();
     }
 
@@ -1130,7 +1129,7 @@ internal sealed class MainForm : Form
     {
         if (disposing)
         {
-            _anim.Dispose(); _clickTimer.Dispose(); _hoverTimer.Dispose(); _progressTimer.Dispose();
+            _anim.Dispose(); _hoverTimer.Dispose(); _stop.Dispose(); _progressTimer.Dispose();
             _readCts?.Dispose();
             _player.Dispose();
             _render.Dispose();
