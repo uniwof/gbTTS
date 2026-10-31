@@ -86,6 +86,13 @@ internal sealed class MainForm : Form
     private int _idleStep;
     private readonly Random _rnd = new();
     private bool _hover;
+    // ---------- v0.7-r4：v0.5 横条 ----------
+    private readonly InkButton _btnMain = new() { Text = "开始" };
+    private readonly InkButton _btnStop = new() { Text = "■ 停止", Enabled = false };
+    private readonly InkButton _btnSet = new() { Text = "设置" };
+    private readonly InkProgressBar _bar = new() { Visible = false };
+    private readonly System.Windows.Forms.Timer _readTimer = new() { Interval = 250 };
+    private string _lastBarKey = "";
     private bool _sessionLocked;
     private float _mouthLevel;
 
@@ -113,7 +120,9 @@ internal sealed class MainForm : Form
         FormBorderStyle = FormBorderStyle.None;
         StartPosition = FormStartPosition.Manual;
         AutoScaleMode = AutoScaleMode.None;
-        ShowInTaskbar = false;
+        ShowInTaskbar = true;
+        BackColor = Ink.Paper;
+        DoubleBuffered = true;
         TopMost = _settings.TopMost;
         Font = Ink.UiFont;
         try { Icon = Icon.ExtractAssociatedIcon(Environment.ProcessPath!); } catch { }
@@ -135,8 +144,6 @@ internal sealed class MainForm : Form
             Log.Write($"点 ■ 停止（状态 {_state}）");
             if (_state is State.Grabbing or State.Reading or State.Paused) { StopReading(); FlashStatus("已停止", 2500); }
         };
-        _tbPoll.Tick += (_, _) => PollToolbar();
-        _tbPoll.Start();
         _toolbar.StopClicked += () => { try { _toolbar.HideNow(); if (_state is State.Grabbing or State.Reading or State.Paused) { StopReading(); FlashStatus("已停止", 2500); } } catch { } };
         _toolbar.PrevClicked += () => { try { NavSentence(-1); } catch { } };
         _toolbar.NextClicked += () => { try { NavSentence(+1); } catch { } };
@@ -148,6 +155,24 @@ internal sealed class MainForm : Form
         _moreMenu.Closed += (_, _) => { ReturnFocus(); Redraw(); };
         _menu.Closed += (_, _) => { ReturnFocus(); Redraw(); };
 
+        // 横条的控件
+        Controls.AddRange(new Control[] { _btnMain, _btnStop, _voiceMenu, _btnSet, _bar });
+        _btnMain.Click += (_, _) =>
+        {
+            var target = CurrentTarget("开始按钮");
+            Log.Write($"点主按钮（状态 {_state}）");
+            if (_state == State.Reading) PauseReading();
+            else _ = OnMainActionAsync(Stopwatch.GetTimestamp(), target);
+        };
+        _btnStop.Click += (_, _) =>
+        {
+            Log.Write($"点 ■ 停止（状态 {_state}）");
+            if (_state is State.Grabbing or State.Reading or State.Paused) { StopReading(); FlashStatus("已停止", 2500); }
+        };
+        _btnSet.Click += (_, _) => OpenSettings();
+        foreach (Control c in new Control[] { _btnMain, _btnStop, _voiceMenu, _btnSet, _bar })
+            c.MouseUp += (_, e) => { if (e.Button == MouseButtons.Right) ShowMenu(Cursor.Position); };
+        _readTimer.Tick += (_, _) => { if (_state == State.Reading) Redraw(); };
         Microsoft.Win32.SystemEvents.SessionSwitch += OnSessionSwitch;
         Microsoft.Win32.SystemEvents.DisplaySettingsChanged += OnDisplayChanged;
     }
@@ -160,8 +185,8 @@ internal sealed class MainForm : Form
         get
         {
             var cp = base.CreateParams;
-            cp.ExStyle |= Native.WS_EX_NOACTIVATE | Native.WS_EX_TOOLWINDOW | Native.WS_EX_LAYERED;
-            cp.ExStyle &= ~Native.WS_EX_APPWINDOW;
+            cp.ExStyle |= Native.WS_EX_NOACTIVATE | Native.WS_EX_APPWINDOW;
+            cp.ExStyle &= ~(Native.WS_EX_TOOLWINDOW | Native.WS_EX_LAYERED);
             return cp;
         }
     }
@@ -174,13 +199,31 @@ internal sealed class MainForm : Form
         RestoreBallPosition();
     }
 
-    private int BallDiameter => Ink.S(this, 60);
-
     private void ApplyBallSize()
     {
-        _render.EnsureSize(BallDiameter);
-        Size = new Size(_render.WindowSize, _render.WindowSize);
-        _lastDrawnKey = "";
+        Size = new Size(Ink.S(this, 456), Ink.S(this, 80));
+        int S(int v) => Ink.S(this, v);
+        int y = S(10), h = S(34);
+        _btnMain.SetBounds(S(16), y, S(80), h);
+        _btnStop.SetBounds(S(102), y, S(76), h);
+        _voiceMenu.SetBounds(S(184), y, S(190), h);
+        _btnSet.SetBounds(S(380), y, S(68), h);
+        _bar.SetBounds(S(316), S(60), S(132), S(8));
+        Ink.RoundWindow(this);
+        _lastBarKey = "";
+        Invalidate();
+    }
+
+    protected override void OnPaint(PaintEventArgs e)
+    {
+        var g = e.Graphics;
+        Ink.RoundBox(this, g, Ink.ToneLight, Ink.InkBlack, Ink.Radius(this) * 1.5f);
+        using (var ink = new SolidBrush(Ink.InkBlack)) g.FillRectangle(ink, 0, 0, Ink.S(this, 8), Height);
+        using (var pen = new Pen(Ink.Grey2)) g.DrawLine(pen, Ink.S(this, 16), Ink.S(this, 52), Width - Ink.S(this, 8), Ink.S(this, 52));
+        int right = _bar.Visible ? _bar.Left - Ink.S(this, 8) : Width - Ink.S(this, 8);
+        var rc = new Rectangle(Ink.S(this, 16), Ink.S(this, 54), Math.Max(10, right - Ink.S(this, 16)), Ink.S(this, 22));
+        TextRenderer.DrawText(g, StatusText().Replace("\n", " "), Ink.SmallFont, rc, Ink.Grey4,
+            TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.SingleLine | TextFormatFlags.EndEllipsis | TextFormatFlags.NoPadding);
     }
 
     protected override void WndProc(ref Message m)
@@ -205,7 +248,7 @@ internal sealed class MainForm : Form
         var wa = Screen.PrimaryScreen?.WorkingArea ?? new Rectangle(0, 0, 1280, 720);
         int margin = Ink.S(this, 24);
         var pos = new Point(wa.Right - Width - margin, wa.Bottom - Height - margin);   // 默认：右下角
-        if (_settings.BallX is int x && _settings.BallY is int y)
+        if (_settings.WindowX is int x && _settings.WindowY is int y)
         {
             var r = new Rectangle(x, y, Width, Height);
             if (Screen.AllScreens.Any(s => s.WorkingArea.IntersectsWith(Rectangle.Inflate(r, -Width / 3, -Height / 3)))) pos = new Point(x, y);
@@ -251,60 +294,35 @@ internal sealed class MainForm : Form
     private void Redraw()
     {
         if (!IsHandleCreated || IsDisposed) return;
-        string frameName = _state switch
+        bool busy = _state != State.Loading && !_importing;
+        bool active = _state is State.Reading or State.Grabbing;
+        string main = _state switch { State.Reading or State.Grabbing => "暂停", State.Paused => "继续", _ => "开始" };
+        bool canMain = _state is State.Idle or State.Reading or State.Paused or State.Grabbing;
+        bool canStop = _state is State.Grabbing or State.Reading or State.Paused;
+        double? prog = _progress;
+        if (prog == null && _state == State.Reading && _queue != null && _track != null)
         {
-            State.NoModel or State.Loading => "sleep",
-            State.Grabbing => "look",
-            State.Paused => "look",
-            State.Reading => _petFrame.StartsWith("talk") ? _petFrame : "talk0",
-            _ => _petFrame is "idle" or "blink" or "page1" or "page2" or "page3" ? _petFrame : "idle",
-        };
-        string glyph = _state switch
-        {
-            State.NoModel or State.Loading => "sleep",
-            State.Reading or State.Grabbing => "wave",
-            _ => "caret",
-        };
-        string? badge = _state == State.Paused ? "pause" : null;
-        int frame = _render.FrameOf(frameName);
-        string key = $"{CurrentLook}|{frame}|{glyph}|{badge}|{_hover}|{(_progress is double p ? (int)(p * 100) : -1)}|{Left},{Top}";
-        if (key == _lastDrawnKey) return;     // 画面没变：什么都不做（空闲时几乎一直是这样）
-        _lastDrawnKey = key;
-        _lastDrawnFrame = frame;
-        _render.Present(Handle, Location, CurrentLook, frame, _progress, badge, glyph, _hover);
+            int n = Math.Max(1, _queue.Count);
+            prog = Math.Min(1.0, (_track.CurrentIndex(_runStart) + 1.0) / n);
+        }
+        string status = StatusText();
+        string key = $"{main}|{active}|{canMain}|{canStop}|{busy}|{(prog is double q ? (int)(q * 100) : -1)}|{status}|{_packs.Count}";
+        if (key == _lastBarKey) return;
+        _lastBarKey = key;
+        _btnMain.Text = main; _btnMain.Active = active; _btnMain.Enabled = canMain;
+        _btnStop.Enabled = canStop;
+        _voiceMenu.Enabled = busy && _packs.Count > 0;
+        _btnSet.Enabled = busy;
+        if (prog is double pv) { _bar.Value = pv; if (!_bar.Visible) { _bar.Visible = true; } } else if (_bar.Visible) _bar.Visible = false;
+        Invalidate();
     }
 
     protected override void OnMove(EventArgs e)
     {
         base.OnMove(e);
-        Redraw();
-        if (_stop.Showing) _stop.ShowBeside(Bounds);   // 拖动球时 ■ 跟着走
     }
 
-    private void PollToolbar()
-    {
-        if (IsDisposed || !IsHandleCreated) return;
-        var p = Cursor.Position;
-        bool over = Visible && (Bounds.Contains(p) || (_toolbar.Visible && _toolbar.Bounds.Contains(p)));
-        if (over) { _tbOverMs += _tbPoll.Interval; _tbAwayMs = 0; } else { _tbAwayMs += _tbPoll.Interval; _tbOverMs = 0; }
-        if (_leftDown || _dragging) { _tbOverMs = 0; return; }
-        bool want = BallLayout.ToolbarShouldBeOpen(_toolbar.Visible, over, _tbOverMs, _tbAwayMs);
-        if (want && !_toolbar.Visible)
-        {
-            var pk = _voiceMenu.SelectedItem as VoicePack;
-            _toolbar.SetVoiceName(pk?.Name ?? "音色");
-            _toolbar.ShowBeside(Bounds);
-        }
-        else if (!want && _toolbar.Visible) _toolbar.HideNow();
-    }
-
-    /// <summary>P0：取文字 / 朗读 / 暂停时显示 ■，其它状态收起。球被隐藏时也收起。</summary>
-    private void UpdateStopButton()
-    {
-        if (IsDisposed || !IsHandleCreated) return;
-        bool show = Visible && BallLayout.ShowStop(_state == State.Grabbing, _state == State.Reading, _state == State.Paused);
-        if (show) _stop.ShowBeside(Bounds); else _stop.HideNow();
-    }
+    private void UpdateStopButton() { Redraw(); }
 
     protected override void OnVisibleChanged(EventArgs e)
     {
@@ -321,15 +339,7 @@ internal sealed class MainForm : Form
     private void ScheduleAnim()
     {
         _anim.Stop();
-        if (CurrentLook != BallRenderer.Look.Pet || _sessionLocked || !Visible) { Redraw(); return; }
-        if (_state == State.Reading) { _anim.Interval = 100; _anim.Start(); return; }
-        if (_state == State.Idle)
-        {
-            long now = Environment.TickCount64;
-            if (_nextIdleEvent <= now) _nextIdleEvent = now + _rnd.Next(3000, 7000);
-            _anim.Interval = (int)Math.Clamp(_nextIdleEvent - now, 50, 10_000);
-            _anim.Start();
-        }
+        if (_state == State.Reading) _readTimer.Start(); else _readTimer.Stop();
         Redraw();
     }
 
@@ -371,15 +381,10 @@ internal sealed class MainForm : Form
     protected override void OnMouseDown(MouseEventArgs e)
     {
         base.OnMouseDown(e);
-        _hoverTimer.Stop();
         if (e.Button == MouseButtons.Left)
         {
-            _leftDown = true;
-            _dragging = false;
-            _downScreen = Cursor.Position;
-            _downWindow = Location;
-            // 单击那一刻就确定朗读目标（悬浮球不抢焦点，此时前台仍是文档）
-            _clickTarget = CurrentTarget("单击悬浮球");
+            _leftDown = true; _dragging = false;
+            _downScreen = Cursor.Position; _downWindow = Location;
             Capture = true;
         }
     }
@@ -387,15 +392,10 @@ internal sealed class MainForm : Form
     protected override void OnMouseMove(MouseEventArgs e)
     {
         base.OnMouseMove(e);
-        if (!_hover) { _hover = true; Redraw(); _hoverTimer.Start(); }
         if (!_leftDown) return;
         var p = Cursor.Position;
-        // P0：按下后移动超过 4px（按 DPI 缩放）算拖动，不算点击
         if (!_dragging && BallLayout.IsDrag(p.X - _downScreen.X, p.Y - _downScreen.Y, Ink.S(this, BallLayout.DragThresholdPx)))
-        {
-            _dragging = true;
-            _bubble.HideNow();
-        }
+        { _dragging = true; _bubble.HideNow(); }
         if (_dragging) Location = new Point(_downWindow.X + p.X - _downScreen.X, _downWindow.Y + p.Y - _downScreen.Y);
     }
 
@@ -404,53 +404,16 @@ internal sealed class MainForm : Form
         base.OnMouseUp(e);
         if (e.Button == MouseButtons.Left && _leftDown)
         {
-            _leftDown = false;
-            Capture = false;
+            _leftDown = false; Capture = false;
             if (_dragging)
             {
                 _dragging = false;
                 KeepOnScreen();
-                _settings.BallX = Left; _settings.BallY = Top;
+                _settings.WindowX = Left; _settings.WindowY = Top;
                 try { _settings.Save(_settingsPath); } catch { }
-                return;
             }
-            OnLeftClick(Cursor.Position);
         }
-        else if (e.Button == MouseButtons.Right)
-        {
-            ShowMenu(Cursor.Position);
-        }
-    }
-
-    protected override void OnMouseLeave(EventArgs e)
-    {
-        base.OnMouseLeave(e);
-        _hover = false;
-        _hoverTimer.Stop();
-        if (_state is not State.Loading && !_importing && _bubble.Showing && _bubbleIsHover) _bubble.HideNow();
-        Redraw();
-    }
-
-    /// <summary>
-    /// P0：单击立刻生效（取消了 v0.6 的“双击停止”和等待双击判定的 0.5 秒）。
-    ///   * 正在朗读 → 立刻暂停；其它状态 → 开始 / 继续。停止请点球旁边的 ■ 或按停止快捷键。
-    /// </summary>
-    private void OnLeftClick(Point pt)
-    {
-        if (_state == State.Reading)
-        {
-            Log.Write("单击悬浮球：暂停");
-            PauseReading();
-            return;
-        }
-        OnSingleClick();
-    }
-
-    private void OnSingleClick()
-    {
-        Log.Write($"单击悬浮球（状态 {_state}）");
-        var target = _clickTarget ?? CurrentTarget("单击悬浮球");
-        _ = OnMainActionAsync(Stopwatch.GetTimestamp(), target);
+        else if (e.Button == MouseButtons.Right) ShowMenu(Cursor.Position);
     }
 
     // =====================================================================
@@ -503,8 +466,6 @@ internal sealed class MainForm : Form
         _moreMenu.Items.Add(Item("导入音色包…", ImportVoices, _state != State.Loading && !_importing));
         _moreMenu.Items.Add(new ToolStripSeparator());
         _moreMenu.Items.Add(Item("始终置顶", ToggleTopMost, check: _settings.TopMost));
-        _moreMenu.Items.Add(Item("外观：看书的小人", () => SetAppearance("pet"), _render.HasPet, check: CurrentLook == BallRenderer.Look.Pet));
-        _moreMenu.Items.Add(Item("外观：简单圆球", () => SetAppearance("ball"), check: CurrentLook == BallRenderer.Look.Ball));
         _moreMenu.Items.Add(Item("关于 / 第三方许可", () => { using var f = new AboutForm(); f.ShowDialog(this); ReturnFocus(); }));
         _moreMenu.Show(screen);
     }
@@ -594,7 +555,7 @@ internal sealed class MainForm : Form
             State.Idle => _mainRegistered ? $"{ed}就绪 · {_hotkey} 朗读 · {StopHint}" : $"{ed}就绪 · 快捷键不可用，请在设置中更换",
             State.Grabbing => "正在获取文字…",
             State.Reading => $"{(_readingSelection ? "朗读选中" : "朗读中")} · {_hotkey} 暂停 · {StopHint}",
-            State.Paused => $"已暂停 · 单击或 {_hotkey} 继续 · {StopHint}",
+            State.Paused => $"已暂停 · 点「继续」或 {_hotkey} · {StopHint}",
             _ => "",
         };
     }
@@ -636,18 +597,18 @@ internal sealed class MainForm : Form
         {
             SetState(State.NoModel);
             ShowError("「音色」文件夹（程序旁边的 voices 文件夹）里没有可用的音色。\n\n" +
-                      "请右键小人 →「导入音色包…」，选择一个音色包文件夹；\n或者把音色包文件夹直接复制到 voices 文件夹里。");
+                      "请右键横条 →「导入音色包…」，选择一个音色包文件夹；\n或者把音色包文件夹直接复制到 voices 文件夹里。");
             return;
         }
         await LoadSelectedVoiceAsync();
-        if (_state == State.Idle) FlashStatus("光标朗读已就绪\n单击小人：从光标处朗读 · 朗读时旁边的 ■：停止 · 右键：菜单", 5000);
+        if (_state == State.Idle) FlashStatus("光标朗读已就绪\n点「开始」：从光标处朗读 · ■ 停止：立刻静音 · 右键：菜单", 5000);
     }
 
     protected override void OnFormClosing(FormClosingEventArgs e)
     {
         base.OnFormClosing(e);
         _anim.Stop(); _progressTimer.Stop(); _hoverTimer.Stop();
-        _stop.HideNow();
+        _readTimer.Stop();
         Microsoft.Win32.SystemEvents.SessionSwitch -= OnSessionSwitch;
         Microsoft.Win32.SystemEvents.DisplaySettingsChanged -= OnDisplayChanged;
         UnregisterHotkeys();
@@ -658,7 +619,7 @@ internal sealed class MainForm : Form
         _tracker?.Dispose();
         try
         {
-            _settings.BallX = Left; _settings.BallY = Top;
+            _settings.WindowX = Left; _settings.WindowY = Top;
             _settings.Save(_settingsPath);
         }
         catch (Exception ex) { Log.Write("保存设置失败: " + ex.Message); }
@@ -1286,8 +1247,8 @@ internal sealed class MainForm : Form
 
         var n = dlg.Result;
         bool threadsChanged = n.NumThreads != _settings.NumThreads;
-        n.WindowX = _settings.WindowX; n.WindowY = _settings.WindowY; n.VoiceId = _settings.VoiceId;
-        n.BallX = Left; n.BallY = Top; n.Appearance = _settings.Appearance;
+        n.VoiceId = _settings.VoiceId;
+        n.WindowX = Left; n.WindowY = Top; n.BallX = _settings.BallX; n.BallY = _settings.BallY; n.Appearance = _settings.Appearance;
         _settings = n;
         TopMost = _settings.TopMost;
         if (!_settings.TopMost) Native.SetWindowPos(Handle, Native.HWND_NOTOPMOST, 0, 0, 0, 0, Native.SWP_NOMOVE | Native.SWP_NOSIZE | Native.SWP_NOACTIVATE);
@@ -1339,7 +1300,7 @@ internal sealed class MainForm : Form
     {
         if (disposing)
         {
-            _anim.Dispose(); _hoverTimer.Dispose(); _stop.Dispose(); _toolbar.Dispose(); _tbPoll.Dispose(); _progressTimer.Dispose();
+            _anim.Dispose(); _hoverTimer.Dispose(); _stop.Dispose(); _toolbar.Dispose(); _tbPoll.Dispose(); _readTimer.Dispose(); _progressTimer.Dispose();
             _readCts?.Dispose();
             _player.Dispose();
             _render.Dispose();
