@@ -62,6 +62,8 @@ internal sealed class MainForm : Form
     private FocusTracker? _tracker;
     private readonly System.Windows.Forms.Timer _anim = new();
     private readonly System.Windows.Forms.Timer _hoverTimer = new() { Interval = 700 };
+    private readonly System.Windows.Forms.Timer _fsTimer = new() { Interval = 1500 };
+    private bool _hiddenByFs;
     private readonly System.Windows.Forms.Timer _progressTimer = new() { Interval = 80 };
     private readonly Stopwatch _loadClock = new();
     private double _loadExpectSeconds = 3;
@@ -151,6 +153,8 @@ internal sealed class MainForm : Form
         _toolbar.VoiceClicked += () => { try { ShowMenu(Cursor.Position); } catch { } };
         _hoverTimer.Tick += (_, _) => { _hoverTimer.Stop(); { } };
         _progressTimer.Tick += (_, _) => UpdateLoadProgress();
+        _fsTimer.Tick += (_, _) => CheckFullscreen();
+        _fsTimer.Start();
         _menu.Font = Ink.UiFont;
         _moreMenu.Font = Ink.UiFont;
         _moreMenu.Closed += (_, _) => { ReturnFocus(); Redraw(); };
@@ -469,6 +473,19 @@ internal sealed class MainForm : Form
         _moreMenu.Items.Add(Item("始终置顶", ToggleTopMost, check: _settings.TopMost));
         _moreMenu.Items.Add(Item("关于 / 第三方许可", () => { using var f = new AboutForm(); f.ShowDialog(this); ReturnFocus(); }));
         _moreMenu.Show(screen);
+    }
+
+    /// <summary>A2：全屏程序（QUNS_BUSY / D3D 全屏 / 演示模式）时自动隐藏横条，结束后恢复；不抢焦点。</summary>
+    private void CheckFullscreen()
+    {
+        try
+        {
+            bool fs = false;
+            if (_settings.HideOnFullscreen) fs = Native.ForegroundIsFullscreen();
+            if (fs && Visible && !_hiddenByFs) { _hiddenByFs = true; Hide(); _bubble.HideNow(); }
+            else if (!fs && _hiddenByFs) { _hiddenByFs = false; Show(); if (_settings.TopMost) ReassertTopMost(); }
+        }
+        catch { }
     }
 
     private void ToggleTopMost()
