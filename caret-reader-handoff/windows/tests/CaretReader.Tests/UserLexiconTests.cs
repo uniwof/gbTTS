@@ -3,6 +3,7 @@ using Xunit;
 
 namespace CaretReader.Tests;
 
+[Collection("TextLayerStatic")]
 public class UserLexiconTests
 {
     private static string Tmp() => Path.Combine(Path.GetTempPath(), "gbtts-ul-" + Guid.NewGuid().ToString("N"), "用户读法词库.tsv");
