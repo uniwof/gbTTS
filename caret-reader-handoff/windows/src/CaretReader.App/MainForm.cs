@@ -124,6 +124,7 @@ internal sealed class MainForm : Form
         BackColor = Ink.Paper;
         DoubleBuffered = true;
         TopMost = _settings.TopMost;
+        AutoStart.Apply(_settings.AutoStart);
         Font = Ink.UiFont;
         try { Icon = Icon.ExtractAssociatedIcon(Environment.ProcessPath!); } catch { }
 
@@ -474,6 +475,7 @@ internal sealed class MainForm : Form
     {
         _settings.TopMost = !_settings.TopMost;
         TopMost = _settings.TopMost;
+        AutoStart.Apply(_settings.AutoStart);
         if (!_settings.TopMost) Native.SetWindowPos(Handle, Native.HWND_NOTOPMOST, 0, 0, 0, 0, Native.SWP_NOMOVE | Native.SWP_NOSIZE | Native.SWP_NOACTIVATE);
         else ReassertTopMost();
         try { _settings.Save(_settingsPath); } catch { }
@@ -869,7 +871,7 @@ internal sealed class MainForm : Form
 
         CrashGuard.Mark($"朗读中（{voice.Id}）");
         var task = SpeechPipeline.RunAsync(queue, _engine, voice.Sid, speed, sink, cts.Token,
-                                           onClause: null, hotkeyTimestamp: pressedAt, gain: (float)voice.Gain,
+                                           onClause: null, hotkeyTimestamp: pressedAt, gain: (float)(voice.Gain * _settings.VolumePercent / 100.0),
                                            startIndex: startIndex, tracker: track)
             .ContinueWith(t =>
             {
@@ -1280,6 +1282,7 @@ internal sealed class MainForm : Form
         n.WindowX = Left; n.WindowY = Top; n.BallX = _settings.BallX; n.BallY = _settings.BallY; n.Appearance = _settings.Appearance;
         _settings = n;
         TopMost = _settings.TopMost;
+        AutoStart.Apply(_settings.AutoStart);
         if (!_settings.TopMost) Native.SetWindowPos(Handle, Native.HWND_NOTOPMOST, 0, 0, 0, 0, Native.SWP_NOMOVE | Native.SWP_NOSIZE | Native.SWP_NOACTIVATE);
         else ReassertTopMost();
         ApplyHotkeys(_settings.Hotkey, _settings.StopHotkey, showErrors: true);

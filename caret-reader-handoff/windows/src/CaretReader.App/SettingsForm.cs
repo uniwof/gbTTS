@@ -37,6 +37,8 @@ internal sealed class SettingsForm : Form
     private readonly NumericUpDown _pSemi = Num(0, 3, 0.05m, 2);
     private readonly NumericUpDown _pColon = Num(0, 3, 0.05m, 2);
     private readonly NumericUpDown _pNewline = Num(0, 3, 0.05m, 2);
+    private readonly NumericUpDown _volume = Num(10, 150, 5, 0);
+    private readonly InkCheckBox _autoStart = new() { Text = "开机自动启动" };
     private readonly InkCheckBox _topMost = new() { Text = "总在最前" };
 
     private int _y;                       // 布局时的“当前行”纵坐标
@@ -80,6 +82,8 @@ internal sealed class SettingsForm : Form
         Section("朗读");
         Row("语速", _speed);
         Hint("1.00 = 原速。建议保持 1.00，用下面的“停顿”来放慢节奏");
+        Row("音量 %", _volume);
+        Hint("只调本软件的声音，100 = 不变；不影响系统音量");
         Row("线程数", _threads);
         Hint("默认 2。电脑较好可调到 4；修改后会重新加载模型");
 
@@ -88,6 +92,9 @@ internal sealed class SettingsForm : Form
         Section("窗口");
         _topMost.Bounds = new Rectangle(S(24), _y, S(200), S(24));
         Controls.Add(_topMost);
+        _y += S(32);
+        _autoStart.Bounds = new Rectangle(S(24), _y, S(200), S(24));
+        Controls.Add(_autoStart);
         _y += S(40);
 
         // ---------- v0.5：关于 / 第三方许可 ----------
@@ -189,6 +196,8 @@ internal sealed class SettingsForm : Form
         _pColon.Value = Clamp(_pColon, (decimal)s.Pauses.Colon);
         _pNewline.Value = Clamp(_pNewline, (decimal)s.Pauses.Newline);
         _topMost.Checked = s.TopMost;
+        _volume.Value = Clamp(_volume, s.VolumePercent);
+        _autoStart.Checked = s.AutoStart;
     }
 
     private AppSettings ReadValues()
@@ -207,6 +216,8 @@ internal sealed class SettingsForm : Form
             Newline = (double)_pNewline.Value,
         };
         s.TopMost = _topMost.Checked;
+        s.VolumePercent = (int)_volume.Value;
+        s.AutoStart = _autoStart.Checked;
         s.Clamp();
         return s;
     }
