@@ -37,11 +37,11 @@ internal static class Ink
 
     private static Font? _ui, _small, _title;
     /// <summary>正文字体 9pt。</summary>
-    public static Font UiFont => _ui ??= new Font(FontFamilyName, 9f, FontStyle.Regular, GraphicsUnit.Point);
+    public static Font UiFont => _ui ??= new Font(FontFamilyName, 9f * (float)Zoom, FontStyle.Regular, GraphicsUnit.Point);
     /// <summary>小字 8pt（状态栏、提示）。</summary>
-    public static Font SmallFont => _small ??= new Font(FontFamilyName, 8f, FontStyle.Regular, GraphicsUnit.Point);
+    public static Font SmallFont => _small ??= new Font(FontFamilyName, 8f * (float)Zoom, FontStyle.Regular, GraphicsUnit.Point);
     /// <summary>分组标题 9pt 粗体。</summary>
-    public static Font TitleFont => _title ??= new Font(FontFamilyName, 9f, FontStyle.Bold, GraphicsUnit.Point);
+    public static Font TitleFont => _title ??= new Font(FontFamilyName, 9f * (float)Zoom, FontStyle.Bold, GraphicsUnit.Point);
 
     // ---------- 网点画刷 ----------
     private static TextureBrush? _toneLight, _toneMedium;
@@ -134,5 +134,8 @@ internal static class Ink
     private static extern int DwmSetWindowAttribute(IntPtr hwnd, int attr, ref int value, int size);
 
     /// <summary>按 DPI 缩放像素值（设计时以 96 DPI 为准，即 100% 缩放）。</summary>
-    public static int S(Control c, int px) => (int)Math.Round(px * c.DeviceDpi / 96.0);
+    public static int S(Control c, int px) => (int)Math.Round(px * c.DeviceDpi / 96.0 * Zoom);
+
+    /// <summary>大字模式倍数（1.0 或 1.5），启动时设置一次。</summary>
+    public static double Zoom { get; set; } = 1.0;
 }

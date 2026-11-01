@@ -39,6 +39,7 @@ internal sealed class SettingsForm : Form
     private readonly NumericUpDown _pNewline = Num(0, 3, 0.05m, 2);
     private readonly NumericUpDown _volume = Num(10, 150, 5, 0);
     private readonly InkCheckBox _hideFs = new() { Text = "全屏程序运行时自动隐藏" };
+    private readonly InkCheckBox _large = new() { Text = "大字模式（重启后生效）" };
     private readonly InkCheckBox _autoStart = new() { Text = "开机自动启动" };
     private readonly InkCheckBox _topMost = new() { Text = "总在最前" };
 
@@ -96,6 +97,9 @@ internal sealed class SettingsForm : Form
         _y += S(32);
         _hideFs.Bounds = new Rectangle(S(24), _y, S(300), S(24));
         Controls.Add(_hideFs);
+        _y += S(28);
+        _large.Bounds = new Rectangle(S(24), _y, S(300), S(24));
+        Controls.Add(_large);
         _y += S(32);
         _autoStart.Bounds = new Rectangle(S(24), _y, S(200), S(24));
         Controls.Add(_autoStart);
@@ -203,6 +207,7 @@ internal sealed class SettingsForm : Form
         _volume.Value = Clamp(_volume, s.VolumePercent);
         _autoStart.Checked = s.AutoStart;
         _hideFs.Checked = s.HideOnFullscreen;
+        _large.Checked = s.LargeMode;
     }
 
     private AppSettings ReadValues()
@@ -224,6 +229,7 @@ internal sealed class SettingsForm : Form
         s.VolumePercent = (int)_volume.Value;
         s.AutoStart = _autoStart.Checked;
         s.HideOnFullscreen = _hideFs.Checked;
+        s.LargeMode = _large.Checked;
         s.Clamp();
         return s;
     }
