@@ -1,4 +1,5 @@
 using System.Runtime.InteropServices;
+using System.IO.Compression;
 using System.Security.Cryptography;
 
 namespace CaretReader.Core;
@@ -53,6 +54,29 @@ public static class VoiceImporter
     /// </summary>
     public static Result Import(string source, string appDir, Action<string, double>? progress, CancellationToken token)
     {
+        // A3：.gbvoice（= zip 改扩展名，内含 voice.json + 模型）→ 先安全解压到程序文件夹下的临时目录，再按文件夹导入
+        if (File.Exists(source) && IsPackFile(source))
+        {
+            string tmp = Path.Combine(Path.GetFullPath(appDir), ".gbvoice-" + Guid.NewGuid().ToString("N").Substring(0, 8));
+            try
+            {
+                progress?.Invoke("正在解压音色包…", 0);
+                string? err = SafeExtract(source, tmp, token);
+                if (err != null) return new Result(new() { new Item(source, null, Path.GetFileNameWithoutExtension(source), err) });
+                var r = Import(tmp, appDir, progress, token);
+                // 来源显示成原文件
+                return new Result(r.Items.Select(i => i with { Source = source }).ToList());
+            }
+            catch (OperationCanceledException) { throw; }
+            catch (Exception ex)
+            {
+                Log.Write("解压音色包失败：" + ex);
+                string msg = ex is UnauthorizedAccessException ? "程序所在的文件夹不允许写入，请把程序放到 D:\\ 或“文档”等位置。" : ex.Message;
+                return new Result(new() { new Item(source, null, Path.GetFileNameWithoutExtension(source), msg) });
+            }
+            finally { TryDelete(tmp); }
+        }
+
         var items = new List<Item>();
         string voices = VoiceLibrary.VoicesDir(appDir);
         source = Path.GetFullPath(source).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
@@ -139,6 +163,42 @@ public static class VoiceImporter
             }
         }
         return new Result(items);
+    }
+
+    public static bool IsPackFile(string path)
+    {
+        string e = Path.GetExtension(path);
+        return e.Equals(".gbvoice", StringComparison.OrdinalIgnoreCase) || e.Equals(".zip", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private const long MaxExtractBytes = 4L * 1024 * 1024 * 1024;
+
+    /// <summary>安全解压：拒绝绝对路径 / “..” 越界（zip-slip）、过大文件。返回错误说明，成功返回 null。</summary>
+    internal static string? SafeExtract(string zipPath, string dest, CancellationToken token)
+    {
+        ZipArchive zip;
+        try { zip = ZipFile.OpenRead(zipPath); }
+        catch (Exception) { return "这个文件不是有效的音色包（.gbvoice 其实是 zip 压缩包，这个文件打不开或已损坏）。"; }
+        using (zip)
+        {
+            if (!zip.Entries.Any(e => e.FullName.Replace('\\', '/').EndsWith(VoicePack.ManifestName, StringComparison.OrdinalIgnoreCase)))
+                return "压缩包里没有找到 voice.json，不是音色包。";
+            if (zip.Entries.Sum(e => e.Length) > MaxExtractBytes) return "音色包解压后超过 4GB，已拒绝。";
+            Directory.CreateDirectory(dest);
+            string root = Path.GetFullPath(dest).TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
+            foreach (var e in zip.Entries)
+            {
+                token.ThrowIfCancellationRequested();
+                string rel = e.FullName.Replace('\\', '/');
+                if (rel.StartsWith("/") || rel.Contains(':')) return "压缩包里有不安全的路径，已拒绝导入。";
+                string target = Path.GetFullPath(Path.Combine(dest, rel));
+                if (!target.StartsWith(root, StringComparison.OrdinalIgnoreCase)) return "压缩包里有不安全的路径，已拒绝导入。";
+                if (rel.EndsWith("/")) { Directory.CreateDirectory(target); continue; }
+                Directory.CreateDirectory(Path.GetDirectoryName(target)!);
+                e.ExtractToFile(target, overwrite: false);
+            }
+        }
+        return null;
     }
 
     /// <summary>音色包里要复制的文件：整个文件夹的所有文件（模型、词典、voice.json、sample、icon 都在里面）。</summary>

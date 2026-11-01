@@ -482,7 +482,7 @@ internal sealed class MainForm : Form
         _moreMenu.Items.Add(Item("下一句", () => NavSentence(+1), navOk));
         _moreMenu.Items.Add(Item("朗读剪贴板", () => OnClipboardKey(Stopwatch.GetTimestamp()),
                              _state is State.Idle or State.Reading or State.Paused or State.Grabbing));
-        _moreMenu.Items.Add(Item("导入音色包…", ImportVoices, _state != State.Loading && !_importing));
+        _moreMenu.Items.Add(Item("导入音色包…", () => ImportVoices(), _state != State.Loading && !_importing));
         _moreMenu.Items.Add(new ToolStripSeparator());
         _moreMenu.Items.Add(Item("始终置顶", ToggleTopMost, check: _settings.TopMost));
         _moreMenu.Items.Add(Item("关于 / 第三方许可", () => { using var f = new AboutForm(); f.ShowDialog(this); ReturnFocus(); }));
@@ -621,6 +621,18 @@ internal sealed class MainForm : Form
         if (_edition.Length > 12) _edition = _edition.Substring(0, 12);
         if (_edition != "") { Text = "光标朗读 · " + _edition; if (_tray != null) _tray.Text = Text; }
         VoiceImporter.CleanupTemp(_appDir);
+        // A3：把 .gbvoice / 音色包文件夹拖到横条上导入
+        AllowDrop = true;
+        DragEnter += (_, e) =>
+        {
+            e.Effect = e.Data?.GetData(DataFormats.FileDrop) is string[] f && f.Length > 0
+                && (File.Exists(f[0]) ? VoiceImporter.IsPackFile(f[0]) : Directory.Exists(f[0]))
+                ? DragDropEffects.Copy : DragDropEffects.None;
+        };
+        DragDrop += (_, e) =>
+        {
+            if (e.Data?.GetData(DataFormats.FileDrop) is string[] f && f.Length > 0) BeginInvoke(() => ImportVoices(f[0]));
+        };
         RefreshVoices(tidy: true);
 
         CrashGuard.Mark("注册快捷键");
@@ -1217,13 +1229,14 @@ internal sealed class MainForm : Form
         _player.Toggle(p.Id, p.SamplePath);
     }
 
-    private async void ImportVoices()
+    private async void ImportVoices(string? dropped = null)
     {
         if (_importing || _state == State.Loading) return;
         StopReading();
         _player.Stop();
 
-        string? folder;
+        string? folder = dropped;
+        if (folder == null)
         using (var dlg = new FolderBrowserDialog
         {
             Description = "选择音色包文件夹（里面有 voice.json；选它外面一两层的文件夹也可以）",
