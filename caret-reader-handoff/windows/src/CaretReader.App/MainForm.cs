@@ -1086,7 +1086,7 @@ internal sealed class MainForm : Form
     {
         if (_voiceMenu.SelectedItem is not VoicePack voice) return;
 
-        if (!forceReload && _engine.IsLoaded(voice, _settings.NumThreads))
+        if (!forceReload && _engine.IsLoaded(voice, EffectiveThreads(voice.Id)))
         {
             Log.Write($"切换音色: {voice.Id}（同一个模型，免加载）");
             SetState(State.Idle);
@@ -1107,7 +1107,7 @@ internal sealed class MainForm : Form
 
         try
         {
-            int threads = _settings.NumThreads;
+            int threads = EffectiveThreads(voice.Id);
             double newlyMeasured = 0;
             await Task.Run(() =>
             {
@@ -1149,6 +1149,39 @@ internal sealed class MainForm : Form
             SetState(State.NoModel);
             ShowError(FriendlyLoadError(ex));
         }
+    }
+
+    private int _tierBump;          // A4：运行时卡顿后额外降的档数（本次运行有效）
+    private bool _tierHooked;
+
+    /// <summary>A4：自动档位下实际用的线程数；没测过速或关闭自适应时用设置里的值。</summary>
+    private int EffectiveThreads(string voiceId)
+    {
+        if (!_tierHooked)
+        {
+            _tierHooked = true;
+            SpeechPipeline.Stutter.Degraded += () => BeginInvoke(new Action(OnStutter));
+        }
+        if (!_settings.AutoTier || !_speed.TryGet(voiceId, out double rtf)) return _settings.NumThreads;
+        int tier = Math.Min(2, AdaptiveTier.TierOf(rtf) + _tierBump);
+        return AdaptiveTier.Threads(tier, Environment.ProcessorCount);
+    }
+
+    private void OnStutter()
+    {
+        if (!_settings.AutoTier || _tierBump >= 2) return;
+        _tierBump++;
+        Log.Write($"朗读中连续卡顿，自动降一档（当前加成 {_tierBump}）");
+        FlashStatus("检测到有点卡，已自动调整，读完这段后生效。", 4000);
+        // 读完（回到空闲）后再重载，不打断当前朗读
+        var tm = new System.Windows.Forms.Timer { Interval = 1000 };
+        tm.Tick += (_, _) =>
+        {
+            if (_state != State.Idle) return;
+            tm.Stop(); tm.Dispose();
+            _ = LoadSelectedVoiceAsync(forceReload: true);
+        };
+        tm.Start();
     }
 
     private static string FriendlyLoadError(Exception ex)

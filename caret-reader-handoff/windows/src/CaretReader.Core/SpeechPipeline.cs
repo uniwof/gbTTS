@@ -225,6 +225,9 @@ public static class SpeechPipeline
         }
     }
 
+    /// <summary>A4：运行时卡顿监视（界面订阅 Degraded 后自动降一档）。</summary>
+    public static readonly StutterMonitor Stutter = new();
+
     private static PipelineStats Run(
         ClauseQueue clauses, TtsEngine engine, int sid, float speed,
         IAudioSink sink, CancellationToken token, Action<int, Clause>? onClause, long hotkeyTimestamp, float gain,
@@ -247,7 +250,10 @@ public static class SpeechPipeline
         double pauseScale = pacer?.PauseScale(voiceId) ?? 1.0;
         float[] Speak(string t)
         {
+            var swS = Stopwatch.StartNew();
             var raw = engine.Synthesize(TextSplitter.TextForEngine(t), sid, speed);
+            swS.Stop();
+            if (sr > 0) Stutter.Report(swS.Elapsed.TotalSeconds, (double)raw.Length / sr);   // A4：只报数字
             return trim == null ? raw : SilenceTrimmer.Trim(raw, sr, trim);
         }
         // 一按“停止”就立刻让声音停下来（不必等当前这句合成完）

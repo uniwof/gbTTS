@@ -64,6 +64,9 @@ public sealed class AppSettings
     /// <summary>A2：开机自启（默认关，写当前用户的 Run 项）。</summary>
     public bool AutoStart { get; set; } = false;
 
+    /// <summary>A4：三档自适应（按本机测速自动选线程数，朗读中连续卡顿自动降一档）。默认开；关掉则只用上面的“线程”设置。</summary>
+    public bool AutoTier { get; set; } = true;
+
     /// <summary>A2：全屏程序（游戏/视频/演示）运行时自动隐藏横条，结束后恢复。默认开。</summary>
     public bool HideOnFullscreen { get; set; } = true;
 
