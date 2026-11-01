@@ -107,6 +107,7 @@ internal sealed class MainForm : Form
     {
         _settingsPath = AppSettings.ResolvePath(_appDir);
         _settings = AppSettings.Load(_settingsPath);
+        Ink.Zoom = _settings.LargeMode ? 1.5 : 1.0;
         _speed = new SpeedStore(Path.Combine(CaretReader.Core.Settings.TextLayerSettings.UserDataDir(_settingsPath), "speed.json"));
         // P1：旧版的五档停顿、旧用户词库迁移到新的用户标点表 / 用户读法词库（只做一次，不覆盖）
         try
@@ -202,6 +203,19 @@ internal sealed class MainForm : Form
         base.OnHandleCreated(e);
         ApplyBallSize();
         RestoreBallPosition();
+    }
+
+    private void ShowGuideOnce()
+    {
+        if (_settings.GuideShown) return;
+        _settings.GuideShown = true;
+        try { _settings.Save(_settingsPath); } catch { }
+        BeginInvoke(new Action(() =>
+        {
+            using var g = new GuideForm(_settings.Hotkey, _settings.StopHotkey);
+            g.ShowDialog(this);
+            ReassertTopMost();
+        }));
     }
 
     private void ApplyBallSize()
@@ -592,6 +606,7 @@ internal sealed class MainForm : Form
         CaretTextGrabber.WarmUp();
         SetupTray();
         Redraw();
+        ShowGuideOnce();
 
         if (CrashGuard.PreviousCrashStage is string lastStage &&
             !lastStage.Contains("就绪") && !lastStage.Contains("朗读中") && !lastStage.Contains("正在退出"))

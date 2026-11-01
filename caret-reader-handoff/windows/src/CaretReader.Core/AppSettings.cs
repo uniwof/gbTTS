@@ -67,6 +67,12 @@ public sealed class AppSettings
     /// <summary>A2：全屏程序（游戏/视频/演示）运行时自动隐藏横条，结束后恢复。默认开。</summary>
     public bool HideOnFullscreen { get; set; } = true;
 
+    /// <summary>A2：大字模式（横条和设置窗约放大到 1.5 倍），重启后生效。默认关。</summary>
+    public bool LargeMode { get; set; } = false;
+
+    /// <summary>A2：首次使用引导是否已看过（只出现一次）。</summary>
+    public bool GuideShown { get; set; } = false;
+
     /// <summary>窗口是否总在最前面。</summary>
     public bool TopMost { get; set; } = true;
 
