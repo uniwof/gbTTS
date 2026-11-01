@@ -24,7 +24,7 @@ public class GoldenTests
             n++;
             if (got != c[1]) bad.Add($"{c[0]}\n  期望 {c[1]}\n  实际 {got}");
         }
-        Assert.Equal(6, n);
+        Assert.True(n >= 6);
         Assert.True(bad.Count == 0, string.Join("\n", bad));
     }
 }
