@@ -58,6 +58,12 @@ public sealed class AppSettings
     /// <summary>P1 文本层设置（Markdown 清理、标题识别、英文策略、规则包开关）。</summary>
     public CaretReader.Core.Settings.TextLayerSettings Text { get; set; } = new();
 
+    /// <summary>A2：本软件独立音量（百分比 10~150，100 = 不变），不影响系统音量。</summary>
+    public int VolumePercent { get; set; } = 100;
+
+    /// <summary>A2：开机自启（默认关，写当前用户的 Run 项）。</summary>
+    public bool AutoStart { get; set; } = false;
+
     /// <summary>窗口是否总在最前面。</summary>
     public bool TopMost { get; set; } = true;
 
@@ -90,6 +96,7 @@ public sealed class AppSettings
     {
         if (Appearance is not ("pet" or "ball")) Appearance = "pet";
         Speed = Math.Clamp(Speed, 0.5, 2.0);
+        VolumePercent = Math.Clamp(VolumePercent, 10, 150);
         NumThreads = Math.Clamp(NumThreads, 1, 8);
         Pauses ??= new PauseSettings();
         Text ??= new CaretReader.Core.Settings.TextLayerSettings();
