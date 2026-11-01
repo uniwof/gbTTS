@@ -638,6 +638,7 @@ internal sealed class MainForm : Form
         if (id == Hotkey.StopId) { Log.Write("停止快捷键"); OnStopKey(); return; }
         if (id == Hotkey.PrevId) { Log.Write("上一句快捷键"); NavSentence(-1); return; }
         if (id == Hotkey.NextId) { Log.Write("下一句快捷键"); NavSentence(+1); return; }
+        if (id == Hotkey.AddReadingId) { Log.Write("添加读法快捷键"); _ = OnAddReadingKeyAsync(); return; }
         if (id == Hotkey.ClipId) { Log.Write("朗读剪贴板快捷键"); OnClipboardKey(pressedAt); return; }
         // 快捷键那一刻的前台窗口就是要读的文档（本程序在前台时用最后一个外部窗口）
         var target = CurrentTarget("快捷键");
@@ -719,6 +720,7 @@ internal sealed class MainForm : Form
         Reg(new Hotkey(CA, Keys.PageUp), Hotkey.PrevId, "上一句");
         Reg(new Hotkey(CA, Keys.PageDown), Hotkey.NextId, "下一句");
         Reg(new Hotkey(CA, Keys.C), Hotkey.ClipId, "朗读剪贴板");
+        Reg(new Hotkey(CA, Keys.D), Hotkey.AddReadingId, "添加读法");
         if (bad.Count > 0) FlashStatus("这些快捷键被别的程序占用了，暂时用不了：\n" + string.Join("、", bad), 6000);
     }
 
@@ -944,6 +946,33 @@ internal sealed class MainForm : Form
         if (text.Length > CaretTextGrabber.MaxChars) text = text.Substring(0, CaretTextGrabber.MaxChars);
         if (_state is State.Grabbing or State.Reading or State.Paused) StopReading();
         _ = StartReadingAsync(pressedAt, CurrentTarget("剪贴板"), text);
+    }
+
+    private bool _addReadingOpen;
+
+    /// <summary>Ctrl+Alt+D：取选中的文字 → 弹「添加读法」小窗；关窗后焦点还给原程序。</summary>
+    private async Task OnAddReadingKeyAsync()
+    {
+        if (_addReadingOpen) return;
+        _addReadingOpen = true;
+        try
+        {
+            var target = CurrentTarget("添加读法");
+            using var cts = new CancellationTokenSource(4000);
+            CaretTextGrabber.Result grab;
+            try { grab = await _grabber.GrabAsync(target, cts.Token); }
+            catch { grab = new CaretTextGrabber.Result(null, "?", ""); }
+            string sel = grab.Selection ? (grab.Text ?? "").Trim() : "";
+            if (sel.Length == 0) { FlashStatus("先选中读错的文字，再按 Ctrl+Alt+D。", 4000); return; }
+            if (sel.Length > AddReadingForm.MaxSourceChars) { FlashStatus($"选中的太长了（超过 {AddReadingForm.MaxSourceChars} 字），请只选读错的那几个字。", 5000); return; }
+            string dir = CaretReader.Core.Settings.TextLayerSettings.UserDataDir(_settingsPath);
+            using var f = new AddReadingForm(sel, dir, t => _ = StartReadingAsync(Stopwatch.GetTimestamp(), CurrentTarget("试听读法"), t));
+            f.ShowDialog();
+            StopReading();
+            ReturnFocus();
+        }
+        catch (Exception ex) { Log.Write("添加读法出错: " + ex.GetType().Name); }
+        finally { _addReadingOpen = false; }
     }
 
     private static async Task FetchRestAsync(Func<string?> rest, ClauseQueue queue, CaretReader.Core.Text.TextLayer layer, CancellationToken token)
